@@ -1,12 +1,18 @@
 /**
- * Techmess ERP - app.js
- * Senior Software Developer: Parceiro de Programacao
- * Description: Core logic for the Techmess ERP & E-commerce SPA.
- * Handles Firebase integration, UI manipulation, and business logic for all modules.
- * VERSION 2.0 - With unique identifiers and price editing.
+ * Techmess ERP - Sistema Profissional de Gestão
+ * Versão 3.0 - Funcionalidades Profissionais Completas
+ * 
+ * Funcionalidades implementadas:
+ * - Identificadores únicos para cada produto
+ * - Controle de preços editáveis na venda
+ * - Filtros avançados por produto e identificador
+ * - Detalhamento completo de vendas/compras/financeiro
+ * - Sistema de parcelas para boleto/cartão/carteira
+ * - Gestão profissional de estoque
+ * - Relatórios avançados
  */
 
-// --- CONFIGURAÇÃO E INICIALIZAÇÃO ---
+// CONFIGURAÇÃO FIREBASE
 const firebaseConfig = {
     apiKey: "AIzaSyARb-0QE9QcYD2OjkCsOj0pmKTgkJQRlSg",
     authDomain: "vipcell-gestor.firebaseapp.com",
@@ -17,1565 +23,3223 @@ const firebaseConfig = {
     appId: "1:259960306679:web:ad7a41cd1842862f7f8cf2"
 };
 
-
+// CONFIGURAÇÃO CLOUDINARY
 const CLOUDINARY_CLOUD_NAME = 'dmuvm1o6m';
 const CLOUDINARY_UPLOAD_PRESET = 'poh3ej4m';
 const CLOUDINARY_API_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
 
-// Inicializa Firebase
+// INICIALIZAÇÃO
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const database = firebase.database();
 
-// --- VARIÁVEIS GLOBAIS DE ESTADO ---
-let cart = {};
-let products = {}; // Agora armazena modelos de produtos
-let suppliers = {};
-let customers = {};
-let currentPurchaseItems = []; // Alterado para array para suportar múltiplos identificadores por item
-let currentSaleItems = []; // Alterado para array
-let currentOrderToConfirm = null;
-let salesHistory = {}; // Cache para o histórico de vendas para filtragem
+// ESTADO GLOBAL DA APLICAÇÃO
+const AppState = {
+    cart: {},
+    products: {},
+    suppliers: {},
+    customers: {},
+    currentPurchaseItems: [],
+    currentSaleItems: [],
+    currentOrderToConfirm: null,
+    salesHistory: {},
+    stockItems: {},
+    isAuthenticated: false
+};
 
-// --- SELETORES DE ELEMENTOS DO DOM (CACHE) ---
-const getElem = (id) => document.getElementById(id);
-const querySel = (selector) => document.querySelector(selector);
-const querySelAll = (selector) => document.querySelectorAll(selector);
+// UTILITÁRIOS
+const Utils = {
+    formatCurrency: (value) => `R$ ${parseFloat(value).toFixed(2).replace('.', ',')}`,
+    formatDate: (dateString) => new Date(dateString).toLocaleDateString('pt-BR'),
+    generateId: () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9),
+    
+    showNotification: (message, type = 'info') => {
+        // Implementação simples de notificação
+        const notification = document.createElement('div');
+        notification.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
+            type === 'success' ? 'bg-green-600' : 
+            type === 'error' ? 'bg-red-600' : 
+            type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
+        } text-white`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    },
 
-const ui = {
-    publicView: getElem('public-view'),
-    managementPanel: getElem('management-panel'),
-    authButton: getElem('auth-button'),
-    nav: {
-        home: getElem('nav-home'),
-        shop: getElem('nav-shop'),
-        cart: getElem('nav-cart'),
-        dashboard: getElem('nav-dashboard'),
-        cartItemCount: getElem('cart-item-count')
+    validateForm: (fields) => {
+        for (const field of fields) {
+            if (!field.value || field.value.trim() === '') {
+                field.classList.add('error-field');
+                return false;
+            } else {
+                field.classList.remove('error-field');
+            }
+        }
+        return true;
+    }
+};
+
+// SELETORES DOM
+const DOM = {
+    // Navegação
+    publicView: document.getElementById('public-view'),
+    managementPanel: document.getElementById('management-panel'),
+    authButton: document.getElementById('auth-button'),
+    
+    // Navegação superior
+    navHome: document.getElementById('nav-home'),
+    navShop: document.getElementById('nav-shop'),
+    navCart: document.getElementById('nav-cart'),
+    navDashboard: document.getElementById('nav-dashboard'),
+    cartItemCount: document.getElementById('cart-item-count'),
+    
+    // Loja pública
+    productList: document.getElementById('product-list'),
+    
+    // Carrinho
+    cartModal: document.getElementById('cart-modal'),
+    cartItems: document.getElementById('cart-items'),
+    cartTotal: document.getElementById('cart-total'),
+    checkoutButton: document.getElementById('checkout-button'),
+    closeCartModal: document.getElementById('close-cart-modal'),
+    
+    // Checkout
+    checkoutModal: document.getElementById('checkout-modal'),
+    customerName: document.getElementById('customer-name'),
+    customerWhatsapp: document.getElementById('customer-whatsapp'),
+    submitCheckout: document.getElementById('submit-checkout'),
+    closeCheckoutModal: document.getElementById('close-checkout-modal'),
+    
+    // Dashboard
+    monthlyRevenue: document.getElementById('monthly-revenue'),
+    dailySales: document.getElementById('daily-sales'),
+    totalStock: document.getElementById('total-stock'),
+    pendingReceivables: document.getElementById('pending-receivables'),
+    lowStockAlerts: document.getElementById('low-stock-alerts'),
+    resetSystemButton: document.getElementById('reset-system-button'),
+    
+    // Vendas
+    pendingOrders: document.getElementById('pending-orders'),
+    salesHistoryList: document.getElementById('sales-history-list'),
+    newSaleButton: document.getElementById('new-sale-button'),
+    salesHistoryFilterProduct: document.getElementById('sales-history-filter-product'),
+    salesHistoryFilterIdentifier: document.getElementById('sales-history-filter-identifier'),
+    applySalesHistoryFilter: document.getElementById('apply-sales-history-filter'),
+    
+    // Estoque
+    productManagementList: document.getElementById('product-management-list'),
+    addProductModelButton: document.getElementById('add-product-model-button'),
+    stockFilterProduct: document.getElementById('stock-filter-product'),
+    stockFilterIdentifier: document.getElementById('stock-filter-identifier'),
+    
+    // Compras
+    purchaseList: document.getElementById('purchase-list'),
+    newPurchaseButton: document.getElementById('new-purchase-button'),
+    
+    // Clientes
+    customerList: document.getElementById('customer-list'),
+    addCustomerButton: document.getElementById('add-customer-button'),
+    
+    // Fornecedores
+    supplierList: document.getElementById('supplier-list'),
+    addSupplierButton: document.getElementById('add-supplier-button'),
+    
+    // Financeiro
+    cashBalance: document.getElementById('cash-balance'),
+    accountsReceivable: document.getElementById('accounts-receivable'),
+    accountsPayable: document.getElementById('accounts-payable'),
+    newExpenseButton: document.getElementById('new-expense-button'),
+    
+    // Relatórios
+    reportsFilterProduct: document.getElementById('reports-filter-product'),
+    reportsFilterIdentifier: document.getElementById('reports-filter-identifier'),
+    reportsFilterDateStart: document.getElementById('reports-filter-date-start'),
+    reportsFilterDateEnd: document.getElementById('reports-filter-date-end'),
+    generateSalesReport: document.getElementById('generate-sales-report'),
+    generateStockReport: document.getElementById('generate-stock-report'),
+    generateFinancialReport: document.getElementById('generate-financial-report'),
+    reportsOutput: document.getElementById('reports-output'),
+    
+    // Modais
+    paymentConfirmationModal: document.getElementById('payment-confirmation-modal'),
+    manualSaleModal: document.getElementById('manual-sale-modal'),
+    customerFormModal: document.getElementById('customer-form-modal'),
+    productModelFormModal: document.getElementById('product-model-form-modal'),
+    supplierFormModal: document.getElementById('supplier-form-modal'),
+    purchaseFormModal: document.getElementById('purchase-form-modal'),
+    expenseFormModal: document.getElementById('expense-form-modal'),
+    detailsModal: document.getElementById('details-modal'),
+    
+    // Botões de fechar modais
+    closePaymentConfirmationModal: document.getElementById('close-payment-confirmation-modal'),
+    closeManualSaleModal: document.getElementById('close-manual-sale-modal'),
+    closeCustomerFormModal: document.getElementById('close-customer-form-modal'),
+    closeProductModelFormModal: document.getElementById('close-product-model-form-modal'),
+    closeSupplierFormModal: document.getElementById('close-supplier-form-modal'),
+    closePurchaseFormModal: document.getElementById('close-purchase-form-modal'),
+    closeExpenseFormModal: document.getElementById('close-expense-form-modal'),
+    closeDetailsModal: document.getElementById('close-details-modal')
+};
+
+// GERENCIAMENTO DE UI
+const UI = {
+    switchView(viewToShow) {
+        DOM.publicView.classList.toggle('hidden', viewToShow !== 'public');
+        DOM.managementPanel.classList.toggle('hidden', viewToShow !== 'management');
+        if (viewToShow === 'management') {
+            this.switchTab('dashboard');
+        }
     },
-    shop: {
-        productList: getElem('product-list')
+
+    switchTab(tabId) {
+        // Esconder todos os conteúdos
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.add('hidden');
+        });
+        
+        // Mostrar conteúdo ativo
+        const activeContent = document.getElementById(`${tabId}-content`);
+        if (activeContent) {
+            activeContent.classList.remove('hidden');
+        }
+
+        // Atualizar botões
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.classList.remove('border-cyan-400', 'text-white');
+            button.classList.add('border-transparent', 'text-gray-300');
+        });
+        
+        const activeButton = document.querySelector(`button[data-tab="${tabId}"]`);
+        if (activeButton) {
+            activeButton.classList.remove('border-transparent', 'text-gray-300');
+            activeButton.classList.add('border-cyan-400', 'text-white');
+        }
     },
-    cart: {
-        modal: getElem('cart-modal'),
-        closeButton: getElem('close-cart-modal'),
-        items: getElem('cart-items'),
-        total: getElem('cart-total'),
-        checkoutButton: getElem('checkout-button')
+
+    toggleModal(modalElement, show) {
+        if (modalElement) {
+            modalElement.classList.toggle('hidden', !show);
+        }
     },
-    checkout: {
-        modal: getElem('checkout-modal'),
-        closeButton: getElem('close-checkout-modal'),
-        nameInput: getElem('customer-name'),
-        whatsappInput: getElem('customer-whatsapp'),
-        submitButton: getElem('submit-checkout')
+
+    showDetailsModal(title, content) {
+        document.getElementById('details-modal-title').textContent = title;
+        document.getElementById('details-modal-content').innerHTML = content;
+        this.toggleModal(DOM.detailsModal, true);
+    }
+};
+
+// AUTENTICAÇÃO
+const Auth = {
+    init() {
+        auth.onAuthStateChanged(user => {
+            AppState.isAuthenticated = !!user;
+            DOM.authButton.textContent = user ? 'Logout' : 'Login';
+            DOM.navDashboard.parentElement.classList.toggle('hidden', !user);
+            
+            if (user) {
+                UI.switchView('management');
+                this.loadManagementData();
+            } else {
+                UI.switchView('public');
+                Shop.loadPublicProducts();
+            }
+        });
     },
-    paymentConfirmationModal: {
-        modal: getElem('payment-confirmation-modal'),
-        closeButton: getElem('close-payment-confirmation-modal'),
-        processButton: getElem('process-sale-confirmation-button'),
-        orderIdInput: getElem('confirm-sale-order-id'),
-        paymentMethodSelect: getElem('confirm-sale-payment-method'),
-        installmentFields: getElem('installment-fields'),
-        installmentsInput: getElem('confirm-sale-installments'),
-        firstDueDateInput: getElem('confirm-sale-first-due-date'),
-        itemsContainer: getElem('order-items-to-confirm'),
-        total: getElem('confirm-sale-total')
+
+    async handleAuthClick() {
+        if (auth.currentUser) {
+            await auth.signOut();
+        } else {
+            const email = prompt('Digite o seu e-mail:');
+            const password = prompt('Digite a sua senha:');
+            if (email && password) {
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                } catch (error) {
+                    Utils.showNotification('Erro de login: ' + error.message, 'error');
+                }
+            }
+        }
     },
-    expenseModal: {
-        modal: getElem('expense-form-modal'),
-        closeButton: getElem('close-expense-form-modal'),
-        saveButton: getElem('save-expense-button'),
-        descriptionInput: getElem('expense-description'),
-        valueInput: getElem('expense-value'),
-        dueDateInput: getElem('expense-due-date'),
-        categorySelect: getElem('expense-category'),
+
+    loadManagementData() {
+        Stock.loadProductModels();
+        Suppliers.loadSuppliers();
+        Customers.loadCustomers();
+        Purchases.loadPurchases();
+        Sales.loadSales();
+        Sales.loadSalesHistory();
+        Finance.loadFinance();
+        Dashboard.updateDashboard();
+    }
+};
+
+// LOJA PÚBLICA
+const Shop = {
+    loadPublicProducts() {
+        database.ref('produtos').on('value', snapshot => {
+            AppState.products = snapshot.val() || {};
+            this.renderPublicProducts();
+        });
     },
-    erp: {
-        tabs: querySelAll('.tab-button'),
-        contents: querySelAll('.tab-content'),
-        dashboard: {
-            content: getElem('dashboard-content'),
-            monthlyRevenue: getElem('monthly-revenue'),
-            dailySales: getElem('daily-sales'),
-            lowStockAlerts: getElem('low-stock-alerts'),
-            resetSystemButton: getElem('reset-system-button')
-        },
-        sales: {
-            content: getElem('sales-content'),
-            pendingOrders: getElem('pending-orders'),
-            historyList: getElem('sales-history-list'),
-            newSaleButton: getElem('new-sale-button'),
-            manualSaleModal: getElem('manual-sale-modal'),
-            closeManualSaleModal: getElem('close-manual-sale-modal'),
-            saveManualSaleButton: getElem('save-manual-sale-button'),
-            customerSelect: getElem('sale-customer'),
-            productModelSelect: getElem('sale-product-model'),
-            productIdentifierSelect: getElem('sale-product-identifier'),
-            priceInput: getElem('sale-price'),
-            addItemButton: getElem('add-item-to-sale-button'),
-            itemsList: getElem('sale-items-list'),
-            total: getElem('sale-total'),
-            dateInput: getElem('sale-date'),
-            paymentMethodSelect: getElem('sale-payment-method'),
-            historyFilterProduct: getElem('sales-history-filter-product'),
-            historyFilterIdentifier: getElem('sales-history-filter-identifier'),
-            applyHistoryFilterButton: getElem('apply-sales-history-filter'),
-        },
-        customers: {
-            content: getElem('customers-content'),
-            addButton: getElem('add-customer-button'),
-            list: getElem('customer-list'),
-            modal: getElem('customer-form-modal'),
-            closeModalButton: getElem('close-customer-form-modal'),
-            saveButton: getElem('save-customer-button'),
-            title: getElem('customer-form-title'),
-            idInput: getElem('customer-id'),
-            nameInput: getElem('new-customer-name'),
-            whatsappInput: getElem('new-customer-whatsapp'),
-            emailInput: getElem('new-customer-email'),
-            notesInput: getElem('new-customer-notes')
-        },
-        purchases: {
-            content: getElem('purchases-content'),
-            newButton: getElem('new-purchase-button'),
-            list: getElem('purchase-list'),
-            modal: getElem('purchase-form-modal'),
-            closeModalButton: getElem('close-purchase-form-modal'),
-            saveButton: getElem('save-purchase-button'),
-            supplierSelect: getElem('purchase-supplier'),
-            productSelect: getElem('purchase-product'),
-            priceInput: getElem('purchase-unit-price'),
-            identifiersTextarea: getElem('purchase-identifiers'),
-            addItemButton: getElem('add-item-to-purchase-button'),
-            itemsList: getElem('purchase-items-list'),
-            total: getElem('purchase-total'),
-            invoiceInput: getElem('purchase-invoice-number'),
-            dateInput: getElem('purchase-date'),
-            paymentMethodSelect: getElem('purchase-payment-method')
-        },
-        stock: {
-            content: getElem('stock-content'),
-            addModelButton: getElem('add-product-model-button'),
-            list: getElem('product-management-list'),
-            modal: getElem('product-model-form-modal'),
-            closeModalButton: getElem('close-product-model-form-modal'),
-            saveButton: getElem('save-product-model-button'),
-            title: getElem('product-model-form-title'),
-            idInput: getElem('product-model-id'),
-            nameInput: getElem('product-model-name'),
-            priceInput: getElem('product-model-price'),
-            descriptionInput: getElem('product-model-description'),
-            alertLevelInput: getElem('product-model-alert-level'),
-            imageUploadInput: getElem('product-model-image-upload'),
-            filterProduct: getElem('stock-filter-product'),
-            filterIdentifier: getElem('stock-filter-identifier'),
-        },
-        finance: {
-            content: getElem('finance-content'),
-            cashBalance: getElem('cash-balance'),
-            accountsReceivable: getElem('accounts-receivable'),
-            accountsPayable: getElem('accounts-payable'),
-            newExpenseButton: getElem('new-expense-button'),
-        },
-        suppliers: {
-            content: getElem('suppliers-content'),
-            addButton: getElem('add-supplier-button'),
-            list: getElem('supplier-list'),
-            modal: getElem('supplier-form-modal'),
-            closeModalButton: getElem('close-supplier-form-modal'),
-            saveButton: getElem('save-supplier-button'),
-            title: getElem('supplier-form-title'),
-            idInput: getElem('supplier-id'),
-            nameInput: getElem('supplier-name'),
-            contactInput: getElem('supplier-contact')
+
+    renderPublicProducts() {
+        const productEntries = Object.entries(AppState.products);
+        
+        if (productEntries.length === 0) {
+            DOM.productList.innerHTML = '<p class="col-span-full text-center empty-state">Nenhum produto disponível no momento.</p>';
+            return;
+        }
+
+        DOM.productList.innerHTML = productEntries.map(([id, product]) => {
+            // Contar unidades disponíveis
+            const availableCount = product.unidades ? 
+                Object.values(product.unidades).filter(unit => unit.status === 'disponivel').length : 0;
+
+            return `
+                <div class="product-card fade-in">
+                    <img src="${product.imagem || 'https://placehold.co/300x200/1f2937/9ca3af?text=Produto'}" 
+                         alt="${product.nome}" loading="lazy">
+                    <h3>${product.nome}</h3>
+                    <p>${product.descricao || 'Sem descrição disponível.'}</p>
+                    <p class="price">${Utils.formatCurrency(product.precoVenda || 0)}</p>
+                    <p class="text-sm text-gray-400 mb-2">${availableCount} unidade(s) disponível(eis)</p>
+                    ${availableCount > 0
+                        ? `<button class="add-to-cart-button w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded" 
+                                   data-id="${id}">Adicionar ao Carrinho</button>`
+                        : `<p class="out-of-stock">Esgotado</p>`
+                    }
+                </div>`;
+        }).join('');
+    }
+};
+
+// CARRINHO DE COMPRAS
+const Cart = {
+    addToCart(productId) {
+        const product = AppState.products[productId];
+        if (!product) return;
+
+        if (AppState.cart[productId]) {
+            AppState.cart[productId].quantity++;
+        } else {
+            AppState.cart[productId] = { 
+                ...product, 
+                quantity: 1, 
+                id: productId 
+            };
+        }
+        this.updateCartDisplay();
+        Utils.showNotification('Produto adicionado ao carrinho!', 'success');
+    },
+
+    removeFromCart(productId) {
+        if (AppState.cart[productId] && AppState.cart[productId].quantity > 1) {
+            AppState.cart[productId].quantity--;
+        } else {
+            delete AppState.cart[productId];
+        }
+        this.updateCartDisplay();
+    },
+
+    updateCartDisplay() {
+        let total = 0;
+        let totalItems = 0;
+        const cartEntries = Object.entries(AppState.cart);
+
+        DOM.cartItems.innerHTML = cartEntries.length === 0
+            ? '<p class="empty-state">O seu carrinho está vazio.</p>'
+            : cartEntries.map(([id, item]) => {
+                const subtotal = item.quantity * item.precoVenda;
+                total += subtotal;
+                totalItems += item.quantity;
+                return `
+                    <div class="cart-item">
+                        <div class="item-info">
+                            <h4>${item.nome}</h4>
+                            <p>${item.quantity} x ${Utils.formatCurrency(item.precoVenda)}</p>
+                            <p class="text-sm text-gray-400">Subtotal: ${Utils.formatCurrency(subtotal)}</p>
+                        </div>
+                        <div class="item-actions">
+                            <button data-id="${id}" class="remove-from-cart-button bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded">
+                                Remover
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+        DOM.cartTotal.textContent = Utils.formatCurrency(total);
+        DOM.checkoutButton.disabled = cartEntries.length === 0;
+
+        // Atualizar badge do carrinho
+        if (totalItems > 0) {
+            DOM.cartItemCount.textContent = totalItems;
+            DOM.cartItemCount.classList.remove('hidden');
+        } else {
+            DOM.cartItemCount.classList.add('hidden');
+        }
+    },
+
+    async submitCheckout() {
+        const name = DOM.customerName.value.trim();
+        const whatsapp = DOM.customerWhatsapp.value.trim();
+
+        if (!Utils.validateForm([DOM.customerName, DOM.customerWhatsapp]) || Object.keys(AppState.cart).length === 0) {
+            Utils.showNotification('Por favor, preencha todos os campos e adicione itens ao carrinho.', 'error');
+            return;
+        }
+
+        try {
+            // Criar cliente
+            const newCustomerData = {
+                nome: name,
+                nome_lowercase: name.toLowerCase(),
+                whatsapp: whatsapp,
+                dataCadastro: new Date().toISOString()
+            };
+            const newCustomerRef = await database.ref('clientes').push(newCustomerData);
+            const customerId = newCustomerRef.key;
+
+            // Criar pedido
+            const order = {
+                clienteId: customerId,
+                cliente: name,
+                whatsapp: whatsapp,
+                itens: AppState.cart,
+                total: Object.values(AppState.cart).reduce((sum, item) => sum + item.quantity * item.precoVenda, 0),
+                status: 'pendente',
+                data: new Date().toISOString()
+            };
+
+            await database.ref('pedidos').push(order);
+            
+            Utils.showNotification('Pedido realizado com sucesso! Nossa equipe entrará em contato.', 'success');
+            AppState.cart = {};
+            this.updateCartDisplay();
+            UI.toggleModal(DOM.checkoutModal, false);
+            DOM.customerName.value = '';
+            DOM.customerWhatsapp.value = '';
+            
+        } catch (error) {
+            console.error("Erro no checkout:", error);
+            Utils.showNotification('Erro ao realizar pedido: ' + error.message, 'error');
         }
     }
 };
 
-// --- FUNÇÕES DE UI ---
+// GESTÃO DE ESTOQUE
+const Stock = {
+    loadProductModels() {
+        database.ref('produtos').on('value', snapshot => {
+            AppState.products = snapshot.val() || {};
+            this.renderStockTable();
+        });
+    },
 
-function switchView(viewToShow) {
-    ui.publicView.classList.toggle('hidden', viewToShow !== 'public');
-    ui.managementPanel.classList.toggle('hidden', viewToShow !== 'management');
-    if (viewToShow === 'management') {
-        switchTab('dashboard');
-    }
-}
-
-function switchTab(tabId) {
-    ui.erp.contents.forEach(content => content.classList.add('hidden'));
-    getElem(`${tabId}-content`).classList.remove('hidden');
-
-    ui.erp.tabs.forEach(button => {
-        button.classList.remove('border-cyan-400', 'text-white');
-        button.classList.add('border-transparent', 'text-gray-300');
-    });
-    const activeButton = querySel(`button[data-tab="${tabId}"]`);
-    if (activeButton) {
-        activeButton.classList.remove('border-transparent', 'text-gray-300');
-        activeButton.classList.add('border-cyan-400', 'text-white');
-    }
-}
-
-function toggleModal(modalElement, show) {
-    if (modalElement) {
-        modalElement.classList.toggle('hidden', !show);
-    }
-}
-
-// --- AUTENTICAÇÃO E INICIALIZAÇÃO DO PAINEL ---
-
-auth.onAuthStateChanged(user => {
-    const isLoggedIn = !!user;
-    ui.authButton.textContent = isLoggedIn ? 'Logout' : 'Login';
-    ui.nav.dashboard.parentElement.classList.toggle('hidden', !isLoggedIn);
-    
-    if (isLoggedIn) {
-        switchView('management');
-        loadStockManagement(); 
-        loadSupplierManagement();
-        loadCustomerManagement();
-        loadPurchases();
-        loadSales();
-        loadSalesHistory();
-        loadFinance();
-        calculateDailySalesAndMonthlyRevenue();
-    } else {
-        switchView('public');
-    }
-});
-
-function handleAuthClick() {
-    if (auth.currentUser) {
-        auth.signOut();
-    } else {
-        const email = prompt('Digite o seu e-mail:');
-        const password = prompt('Digite a sua senha:');
-        if (email && password) {
-            auth.signInWithEmailAndPassword(email, password)
-                .catch(error => alert('Erro de login: ' + error.message));
-        }
-    }
-}
-
-// --- MÓDULO: VITRINE PÚBLICA (E-COMMERCE) ---
-function loadPublicProducts() {
-    database.ref('estoque').on('value', snapshot => {
-        products = snapshot.val() || {};
+    renderStockTable(filteredProducts = null) {
+        const products = filteredProducts || AppState.products;
         const productEntries = Object.entries(products);
-        ui.shop.productList.innerHTML = productEntries.length === 0 
-            ? '<p class="col-span-full text-center">Nenhum produto disponível no momento.</p>'
-            : productEntries.map(([id, p]) => {
-                const availableUnits = p.unidades ? Object.values(p.unidades).filter(u => u.status === 'disponivel').length : 0;
-                return `
-                <div class="product-card">
-                    <img src="${p.imagem || 'https://placehold.co/300x200/1f2937/9ca3af?text=Produto'}" alt="${p.nome}">
-                    <h3>${p.nome}</h3>
-                    <p>${p.descricao || 'Sem descrição.'}</p>
-                    <p class="price">R$ ${(p.precoVenda || 0).toFixed(2).replace('.', ',')}</p>
-                    ${availableUnits > 0
-                        ? `<button class="add-to-cart-button w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded" data-id="${id}">Adicionar ao Carrinho</button>`
-                        : `<p class="out-of-stock">Esgotado</p>`
-                    }
-                </div>`;
-            }).join('');
-    });
-}
 
-function addToCart(productId) {
-    if (cart[productId]) {
-        cart[productId].quantity++;
-    } else {
-        cart[productId] = { ...products[productId], quantity: 1, id: productId };
-    }
-    updateCartDisplay();
-}
+        if (productEntries.length === 0) {
+            DOM.productManagementList.innerHTML = '<p class="empty-state">Nenhum produto encontrado.</p>';
+            return;
+        }
 
-function removeFromCart(productId) {
-    if (cart[productId] && cart[productId].quantity > 1) {
-        cart[productId].quantity--;
-    } else {
-        delete cart[productId];
-    }
-    updateCartDisplay();
-}
+        const tableRows = productEntries.map(([modelId, product]) => {
+            const units = product.unidades || {};
+            const availableCount = Object.values(units).filter(u => u.status === 'disponivel').length;
+            const soldCount = Object.values(units).filter(u => u.status === 'vendido').length;
+            const totalCount = Object.keys(units).length;
 
-function updateCartDisplay() {
-    let total = 0;
-    let totalItems = 0;
-    const cartEntries = Object.entries(cart);
+            // Listar unidades
+            const unitsList = Object.entries(units).map(([identifier, unit]) => 
+                `<div class="text-xs p-1 rounded ${unit.status === 'disponivel' ? 'bg-green-800' : 'bg-red-800'}">
+                    ${identifier} (${unit.status})
+                </div>`
+            ).join('');
 
-    ui.cart.items.innerHTML = cartEntries.length === 0
-        ? '<p>O seu carrinho está vazio.</p>'
-        : cartEntries.map(([id, item]) => {
-            total += item.quantity * item.precoVenda;
-            totalItems += item.quantity;
             return `
-                <div class="cart-item">
-                    <div class="item-info">
-                        <h4>${item.nome}</h4>
-                        <p>${item.quantity} x R$ ${item.precoVenda.toFixed(2).replace('.', ',')}</p>
+                <tr class="clickable-row" data-type="product" data-id="${modelId}">
+                    <td>
+                        <div class="flex items-center">
+                            <img src="${product.imagem || 'https://placehold.co/50x50/1f2937/9ca3af?text=P'}" 
+                                 alt="${product.nome}" class="w-12 h-12 object-cover rounded mr-3">
+                            <div>
+                                <div class="font-semibold">${product.nome}</div>
+                                <div class="text-sm text-gray-400">${product.descricao || 'Sem descrição'}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>${Utils.formatCurrency(product.precoVenda || 0)}</td>
+                    <td>
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-green-400">${availableCount}</div>
+                            <div class="text-xs text-gray-400">Disponível</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="text-center">
+                            <div class="text-lg font-bold text-red-400">${soldCount}</div>
+                            <div class="text-xs text-gray-400">Vendido</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="text-center">
+                            <div class="text-lg font-bold">${totalCount}</div>
+                            <div class="text-xs text-gray-400">Total</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="flex flex-wrap gap-1 max-w-xs">
+                            ${unitsList || '<span class="text-gray-400 text-xs">Nenhuma unidade</span>'}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="flex gap-1">
+                            <button class="edit-product-model-button bg-blue-600 text-white text-xs px-2 py-1 rounded" 
+                                    data-id="${modelId}">Editar</button>
+                            <button class="delete-product-model-button bg-red-600 text-white text-xs px-2 py-1 rounded" 
+                                    data-id="${modelId}">Excluir</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.productManagementList.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Produto</th>
+                        <th>Preço</th>
+                        <th>Disponível</th>
+                        <th>Vendido</th>
+                        <th>Total</th>
+                        <th>Identificadores</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    applyFilters() {
+        const productFilter = DOM.stockFilterProduct.value.toLowerCase().trim();
+        const identifierFilter = DOM.stockFilterIdentifier.value.toLowerCase().trim();
+
+        if (!productFilter && !identifierFilter) {
+            this.renderStockTable();
+            return;
+        }
+
+        const filteredProducts = {};
+        
+        for (const [modelId, product] of Object.entries(AppState.products)) {
+            let matchProduct = false;
+            let matchIdentifier = false;
+
+            // Filtro por nome do produto
+            if (!productFilter || product.nome.toLowerCase().includes(productFilter)) {
+                matchProduct = true;
+            }
+
+            // Filtro por identificador
+            if (!identifierFilter) {
+                matchIdentifier = true;
+            } else if (product.unidades) {
+                for (const identifier of Object.keys(product.unidades)) {
+                    if (identifier.toLowerCase().includes(identifierFilter)) {
+                        matchIdentifier = true;
+                        break;
+                    }
+                }
+            }
+
+            if (matchProduct && matchIdentifier) {
+                filteredProducts[modelId] = product;
+            }
+        }
+
+        this.renderStockTable(filteredProducts);
+    },
+
+    async saveProductModel() {
+        const id = document.getElementById('product-model-id').value;
+        const name = document.getElementById('product-model-name').value.trim();
+        const price = parseFloat(document.getElementById('product-model-price').value);
+        const description = document.getElementById('product-model-description').value.trim();
+        const alertLevel = parseInt(document.getElementById('product-model-alert-level').value) || 0;
+        const imageFile = document.getElementById('product-model-image-upload').files[0];
+        const identifiers = document.getElementById('product-model-identifiers').value.trim();
+        const unitCost = parseFloat(document.getElementById('product-model-unit-cost').value) || 0;
+
+        if (!Utils.validateForm([
+            document.getElementById('product-model-name'),
+            document.getElementById('product-model-price')
+        ])) {
+            Utils.showNotification('Por favor, preencha todos os campos obrigatórios.', 'error');
+            return;
+        }
+
+        try {
+            let imageUrl = (id && AppState.products[id] && AppState.products[id].imagem) || '';
+            
+            // Upload da imagem se fornecida
+            if (imageFile) {
+                const formData = new FormData();
+                formData.append('file', imageFile);
+                formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+                
+                const response = await fetch(CLOUDINARY_API_URL, { 
+                    method: 'POST', 
+                    body: formData 
+                });
+                const data = await response.json();
+                
+                if (data.secure_url) {
+                    imageUrl = data.secure_url;
+                } else {
+                    throw new Error('Erro no upload da imagem');
+                }
+            }
+
+            const productData = {
+                nome: name,
+                nome_lowercase: name.toLowerCase(),
+                precoVenda: price,
+                descricao: description,
+                nivelAlertaEstoque: alertLevel,
+                imagem: imageUrl,
+                dataAtualizacao: new Date().toISOString()
+            };
+
+            // Processar identificadores se fornecidos
+            if (identifiers && unitCost > 0) {
+                const identifierList = identifiers.split('\n')
+                    .map(id => id.trim())
+                    .filter(id => id.length > 0);
+
+                if (identifierList.length > 0) {
+                    productData.unidades = {};
+                    for (const identifier of identifierList) {
+                        productData.unidades[identifier] = {
+                            status: 'disponivel',
+                            dataEntrada: new Date().toISOString(),
+                            custoCompra: unitCost
+                        };
+                    }
+                }
+            }
+
+            const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
+            await dbRef.set(productData);
+
+            Utils.showNotification(`Produto ${id ? 'atualizado' : 'criado'} com sucesso!`, 'success');
+            UI.toggleModal(DOM.productModelFormModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar produto:", error);
+            Utils.showNotification('Erro ao salvar produto: ' + error.message, 'error');
+        }
+    },
+
+    openNewProductModelModal() {
+        document.getElementById('product-model-form-title').textContent = 'Novo Modelo de Produto';
+        document.getElementById('product-model-id').value = '';
+        document.getElementById('product-model-name').value = '';
+        document.getElementById('product-model-price').value = '';
+        document.getElementById('product-model-description').value = '';
+        document.getElementById('product-model-alert-level').value = '';
+        document.getElementById('product-model-image-upload').value = '';
+        document.getElementById('product-model-identifiers').value = '';
+        document.getElementById('product-model-unit-cost').value = '';
+        UI.toggleModal(DOM.productModelFormModal, true);
+    },
+
+    openEditProductModelModal(modelId) {
+        const product = AppState.products[modelId];
+        if (!product) return;
+
+        document.getElementById('product-model-form-title').textContent = 'Editar Modelo de Produto';
+        document.getElementById('product-model-id').value = modelId;
+        document.getElementById('product-model-name').value = product.nome;
+        document.getElementById('product-model-price').value = product.precoVenda;
+        document.getElementById('product-model-description').value = product.descricao || '';
+        document.getElementById('product-model-alert-level').value = product.nivelAlertaEstoque || '';
+        document.getElementById('product-model-image-upload').value = '';
+        document.getElementById('product-model-identifiers').value = '';
+        document.getElementById('product-model-unit-cost').value = '';
+        UI.toggleModal(DOM.productModelFormModal, true);
+    },
+
+    async deleteProductModel(modelId) {
+        const product = AppState.products[modelId];
+        if (!product) return;
+
+        const hasUnits = product.unidades && Object.keys(product.unidades).length > 0;
+        const confirmMessage = hasUnits 
+            ? `Tem certeza que deseja excluir "${product.nome}"? Isso removerá TODAS as unidades em estoque. Esta ação é irreversível.`
+            : `Tem certeza que deseja excluir "${product.nome}"?`;
+
+        if (confirm(confirmMessage)) {
+            try {
+                await database.ref('produtos/' + modelId).remove();
+                Utils.showNotification('Produto excluído com sucesso!', 'success');
+            } catch (error) {
+                Utils.showNotification('Erro ao excluir produto: ' + error.message, 'error');
+            }
+        }
+    },
+
+    showProductDetails(modelId) {
+        const product = AppState.products[modelId];
+        if (!product) return;
+
+        const units = product.unidades || {};
+        const unitsList = Object.entries(units).map(([identifier, unit]) => 
+            `<div class="flex justify-between items-center p-2 rounded ${unit.status === 'disponivel' ? 'bg-green-800' : 'bg-red-800'}">
+                <span class="font-mono">${identifier}</span>
+                <span class="text-xs uppercase">${unit.status}</span>
+            </div>`
+        ).join('');
+
+        const content = `
+            <div class="space-y-4">
+                <div class="flex items-center space-x-4">
+                    <img src="${product.imagem || 'https://placehold.co/100x100/1f2937/9ca3af?text=P'}" 
+                         alt="${product.nome}" class="w-20 h-20 object-cover rounded">
+                    <div>
+                        <h4 class="text-lg font-semibold">${product.nome}</h4>
+                        <p class="text-gray-400">${product.descricao || 'Sem descrição'}</p>
+                        <p class="text-cyan-400 font-bold">${Utils.formatCurrency(product.precoVenda)}</p>
                     </div>
-                    <div class="item-actions">
-                        <button data-id="${id}" class="remove-from-cart-button bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded">Remover</button>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div class="bg-gray-700 p-3 rounded">
+                        <div class="text-2xl font-bold text-green-400">
+                            ${Object.values(units).filter(u => u.status === 'disponivel').length}
+                        </div>
+                        <div class="text-sm text-gray-400">Disponível</div>
+                    </div>
+                    <div class="bg-gray-700 p-3 rounded">
+                        <div class="text-2xl font-bold text-red-400">
+                            ${Object.values(units).filter(u => u.status === 'vendido').length}
+                        </div>
+                        <div class="text-sm text-gray-400">Vendido</div>
+                    </div>
+                    <div class="bg-gray-700 p-3 rounded">
+                        <div class="text-2xl font-bold text-cyan-400">
+                            ${Object.keys(units).length}
+                        </div>
+                        <div class="text-sm text-gray-400">Total</div>
+                    </div>
+                </div>
+
+                <div>
+                    <h5 class="font-semibold mb-2">Identificadores em Estoque:</h5>
+                    <div class="space-y-1 max-h-40 overflow-y-auto">
+                        ${unitsList || '<p class="text-gray-400 text-center">Nenhuma unidade em estoque</p>'}
+                    </div>
+                </div>
+
+                <div class="text-xs text-gray-400">
+                    <p>Nível de alerta: ${product.nivelAlertaEstoque || 0} unidades</p>
+                    <p>Última atualização: ${product.dataAtualizacao ? Utils.formatDate(product.dataAtualizacao) : 'N/A'}</p>
+                </div>
+            </div>
+        `;
+
+        UI.showDetailsModal(`Detalhes: ${product.nome}`, content);
+    }
+};
+
+// GESTÃO DE VENDAS
+const Sales = {
+    loadSales() {
+        database.ref('pedidos').orderByChild('status').equalTo('pendente').on('value', snapshot => {
+            const orders = snapshot.val() || {};
+            window.pendingOrdersData = orders;
+            this.renderPendingOrders(orders);
+        });
+    },
+
+    renderPendingOrders(orders) {
+        const orderEntries = Object.entries(orders);
+        
+        if (orderEntries.length === 0) {
+            DOM.pendingOrders.innerHTML = '<p class="empty-state">Nenhum pedido pendente.</p>';
+            return;
+        }
+
+        const tableRows = orderEntries.map(([id, order]) => {
+            const itemsList = Object.values(order.itens)
+                .map(item => `${item.nome} (${item.quantity}x)`)
+                .join(', ');
+
+            return `
+                <tr class="clickable-row" data-type="order" data-id="${id}">
+                    <td>${Utils.formatDate(order.data)}</td>
+                    <td>${order.cliente}</td>
+                    <td>${order.whatsapp}</td>
+                    <td class="text-xs max-w-xs">${itemsList}</td>
+                    <td class="font-semibold">${Utils.formatCurrency(order.total)}</td>
+                    <td>
+                        <div class="flex gap-1">
+                            <button class="confirm-sale-button bg-green-600 text-white text-xs px-2 py-1 rounded" 
+                                    data-id="${id}">Confirmar</button>
+                            <button class="cancel-order-button bg-red-600 text-white text-xs px-2 py-1 rounded" 
+                                    data-id="${id}">Cancelar</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.pendingOrders.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Cliente</th>
+                        <th>WhatsApp</th>
+                        <th>Itens</th>
+                        <th>Total</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    loadSalesHistory() {
+        database.ref('vendas').limitToLast(100).on('value', snapshot => {
+            AppState.salesHistory = snapshot.val() || {};
+            this.renderSalesHistory();
+        });
+    },
+
+    renderSalesHistory(filteredSales = null) {
+        const sales = filteredSales || AppState.salesHistory;
+        const salesEntries = Object.entries(sales).reverse();
+
+        if (salesEntries.length === 0) {
+            DOM.salesHistoryList.innerHTML = '<p class="empty-state">Nenhuma venda encontrada.</p>';
+            return;
+        }
+
+        const tableRows = salesEntries.map(([id, sale]) => {
+            const itemsList = Object.values(sale.itens).map(item => 
+                `<div class="text-xs p-1 bg-gray-700 rounded mb-1">
+                    ${item.nome} (S/N: ${item.identifier}) - ${Utils.formatCurrency(item.precoVenda)}
+                </div>`
+            ).join('');
+
+            const paymentInfo = sale.pagamento ? 
+                `${sale.pagamento.metodo} ${sale.pagamento.parcelas ? `(${sale.pagamento.parcelas}x)` : ''}` : 'N/A';
+
+            return `
+                <tr class="clickable-row" data-type="sale" data-id="${id}">
+                    <td>${Utils.formatDate(sale.data)}</td>
+                    <td>${sale.cliente}</td>
+                    <td>${paymentInfo}</td>
+                    <td class="max-w-xs">${itemsList}</td>
+                    <td class="font-semibold">${Utils.formatCurrency(sale.total)}</td>
+                    <td>
+                        <span class="status-badge status-${sale.status.toLowerCase().replace('í', 'i')}">${sale.status}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.salesHistoryList.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Cliente</th>
+                        <th>Pagamento</th>
+                        <th>Itens</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    applySalesHistoryFilter() {
+        const productFilter = DOM.salesHistoryFilterProduct.value.toLowerCase().trim();
+        const identifierFilter = DOM.salesHistoryFilterIdentifier.value.toLowerCase().trim();
+
+        if (!productFilter && !identifierFilter) {
+            this.renderSalesHistory();
+            return;
+        }
+
+        const filteredSales = {};
+        
+        for (const [saleId, sale] of Object.entries(AppState.salesHistory)) {
+            let matchFound = false;
+            
+            for (const item of Object.values(sale.itens)) {
+                const nameMatch = !productFilter || item.nome.toLowerCase().includes(productFilter);
+                const identifierMatch = !identifierFilter || item.identifier.toLowerCase().includes(identifierFilter);
+                
+                if (nameMatch && identifierMatch) {
+                    matchFound = true;
+                    break;
+                }
+            }
+            
+            if (matchFound) {
+                filteredSales[saleId] = sale;
+            }
+        }
+
+        this.renderSalesHistory(filteredSales);
+    },
+
+    openPaymentConfirmationModal(orderId) {
+        AppState.currentOrderToConfirm = { id: orderId, ...window.pendingOrdersData[orderId] };
+        const order = AppState.currentOrderToConfirm;
+        
+        // Configurar campos de pagamento
+        const paymentMethodSelect = document.getElementById('confirm-sale-payment-method');
+        const installmentFields = document.getElementById('installment-fields');
+        const installmentsInput = document.getElementById('confirm-sale-installments');
+        const firstDueDateInput = document.getElementById('confirm-sale-first-due-date');
+        
+        paymentMethodSelect.value = 'Pix';
+        installmentFields.classList.add('hidden');
+        installmentsInput.value = 1;
+        firstDueDateInput.value = new Date().toISOString().split('T')[0];
+        
+        // Configurar itens para confirmação
+        const itemsContainer = document.getElementById('order-items-to-confirm');
+        itemsContainer.innerHTML = '';
+        
+        let itemIndex = 0;
+        for (const [modelId, item] of Object.entries(order.itens)) {
+            for (let i = 0; i < item.quantity; i++) {
+                const product = AppState.products[item.id];
+                const availableUnits = product && product.unidades ? 
+                    Object.keys(product.unidades).filter(id => product.unidades[id].status === 'disponivel') : [];
+                
+                const options = availableUnits.map(uid => 
+                    `<option value="${uid}">${uid}</option>`
+                ).join('');
+
+                const itemHtml = `
+                    <div class="p-3 bg-gray-700 rounded" data-item-index="${itemIndex}">
+                        <p class="font-semibold">${item.nome} (Unidade ${i + 1})</p>
+                        <div class="grid grid-cols-2 gap-4 mt-2">
+                            <div>
+                                <label class="block text-xs mb-1">Identificador (S/N)</label>
+                                <select class="form-input w-full confirm-item-identifier" data-model-id="${item.id}">
+                                    <option value="">Selecione...</option>
+                                    ${options}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs mb-1">Preço Final (R$)</label>
+                                <input type="number" step="0.01" class="form-input w-full confirm-item-price" 
+                                       value="${item.precoVenda.toFixed(2)}">
+                            </div>
+                        </div>
+                    </div>
+                `;
+                itemsContainer.innerHTML += itemHtml;
+                itemIndex++;
+            }
+        }
+
+        this.updateConfirmationTotal();
+        UI.toggleModal(DOM.paymentConfirmationModal, true);
+    },
+
+    updateConfirmationTotal() {
+        let total = 0;
+        document.querySelectorAll('.confirm-item-price').forEach(input => {
+            total += parseFloat(input.value) || 0;
+        });
+        document.getElementById('confirm-sale-total').textContent = Utils.formatCurrency(total);
+    },
+
+    toggleInstallmentFields() {
+        const method = document.getElementById('confirm-sale-payment-method').value;
+        const installmentFields = document.getElementById('installment-fields');
+        const show = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(method);
+        installmentFields.classList.toggle('hidden', !show);
+    },
+
+    async processSaleConfirmation() {
+        if (!AppState.currentOrderToConfirm) {
+            Utils.showNotification('Erro: Pedido não encontrado.', 'error');
+            return;
+        }
+
+        const orderId = AppState.currentOrderToConfirm.id;
+        const order = AppState.currentOrderToConfirm;
+        
+        const itemElements = document.querySelectorAll('#order-items-to-confirm > div');
+        const finalItems = {};
+        const updates = {};
+        let total = 0;
+
+        // Validar e processar itens
+        for (const el of itemElements) {
+            const identifierSelect = el.querySelector('.confirm-item-identifier');
+            const priceInput = el.querySelector('.confirm-item-price');
+            
+            const identifier = identifierSelect.value;
+            const modelId = identifierSelect.dataset.modelId;
+            const price = parseFloat(priceInput.value);
+
+            if (!identifier || isNaN(price) || price < 0) {
+                Utils.showNotification('Todos os itens devem ter um identificador selecionado e um preço válido.', 'error');
+                return;
+            }
+
+            if (updates[`/produtos/${modelId}/unidades/${identifier}/status`]) {
+                Utils.showNotification(`O identificador "${identifier}" foi selecionado mais de uma vez.`, 'error');
+                return;
+            }
+
+            updates[`/produtos/${modelId}/unidades/${identifier}/status`] = 'vendido';
+            finalItems[identifier] = {
+                modelId: modelId,
+                identifier: identifier,
+                nome: AppState.products[modelId].nome,
+                imagem: AppState.products[modelId].imagem,
+                precoVenda: price
+            };
+            total += price;
+        }
+
+        const paymentMethod = document.getElementById('confirm-sale-payment-method').value;
+        const installments = parseInt(document.getElementById('confirm-sale-installments').value) || 1;
+        const firstDueDate = document.getElementById('confirm-sale-first-due-date').value;
+        
+        // Validar campos de pagamento
+        if (['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(paymentMethod) && !firstDueDate) {
+            Utils.showNotification('Para esta forma de pagamento, a data do primeiro vencimento é obrigatória.', 'error');
+            return;
+        }
+
+        try {
+            // Atualizar status dos produtos
+            await database.ref().update(updates);
+
+            // Criar venda
+            const saleData = {
+                clienteId: order.clienteId,
+                cliente: order.cliente,
+                whatsapp: order.whatsapp,
+                itens: finalItems,
+                total: total,
+                data: new Date().toISOString(),
+                status: 'Concluída',
+                pagamento: {
+                    metodo: paymentMethod,
+                    parcelas: installments,
+                    status: 'A Receber'
+                }
+            };
+            
+            const newSaleRef = await database.ref('vendas').push(saleData);
+            
+            // Criar contas a receber
+            const installmentValue = total / installments;
+            for (let i = 1; i <= installments; i++) {
+                const dueDate = new Date(firstDueDate + 'T12:00:00Z');
+                dueDate.setMonth(dueDate.getMonth() + (i - 1));
+
+                await database.ref('contasReceber').push({
+                    vendaId: newSaleRef.key,
+                    clienteId: order.clienteId,
+                    clienteNome: order.cliente,
+                    descricao: `Parcela ${i}/${installments} - Venda #${newSaleRef.key.slice(-5)}`,
+                    valor: installmentValue,
+                    dataVencimento: dueDate.toISOString().split('T')[0],
+                    status: 'Pendente'
+                });
+            }
+
+            // Remover pedido
+            await database.ref('pedidos/' + orderId).remove();
+
+            Utils.showNotification('Venda confirmada com sucesso!', 'success');
+            UI.toggleModal(DOM.paymentConfirmationModal, false);
+            AppState.currentOrderToConfirm = null;
+
+        } catch (error) {
+            console.error("Erro ao processar venda:", error);
+            Utils.showNotification('Erro ao processar a venda: ' + error.message, 'error');
+        }
+    },
+
+    async cancelOrder(orderId) {
+        if (confirm('Tem certeza que deseja cancelar este pedido?')) {
+            try {
+                await database.ref('pedidos/' + orderId).remove();
+                Utils.showNotification('Pedido cancelado!', 'success');
+            } catch (error) {
+                Utils.showNotification('Erro ao cancelar pedido: ' + error.message, 'error');
+            }
+        }
+    },
+
+    openNewSaleModal() {
+        // Carregar clientes
+        const customerSelect = document.getElementById('sale-customer');
+        const customerOptions = Object.entries(AppState.customers)
+            .map(([id, customer]) => `<option value="${id}">${customer.nome}</option>`)
+            .join('');
+        customerSelect.innerHTML = '<option value="">Selecione o Cliente</option>' + customerOptions;
+
+        // Carregar produtos
+        const productSelect = document.getElementById('sale-product-model');
+        const productOptions = Object.entries(AppState.products)
+            .map(([id, product]) => `<option value="${id}">${product.nome}</option>`)
+            .join('');
+        productSelect.innerHTML = '<option value="">Selecione o Modelo</option>' + productOptions;
+
+        // Configurar data atual
+        document.getElementById('sale-date').value = new Date().toISOString().split('T')[0];
+        
+        // Limpar itens
+        AppState.currentSaleItems = [];
+        this.updateSaleItemsList();
+        
+        UI.toggleModal(DOM.manualSaleModal, true);
+    },
+
+    populateSaleIdentifiers() {
+        const modelId = document.getElementById('sale-product-model').value;
+        const identifierSelect = document.getElementById('sale-product-identifier');
+        const priceInput = document.getElementById('sale-price');
+
+        if (!modelId) {
+            identifierSelect.innerHTML = '<option value="">Selecione o Modelo primeiro</option>';
+            priceInput.value = '';
+            return;
+        }
+
+        const product = AppState.products[modelId];
+        if (!product) return;
+
+        const availableUnits = product.unidades ? 
+            Object.keys(product.unidades).filter(id => 
+                product.unidades[id].status === 'disponivel' &&
+                !AppState.currentSaleItems.some(item => item.identifier === id)
+            ) : [];
+
+        const options = availableUnits.map(id => `<option value="${id}">${id}</option>`).join('');
+        identifierSelect.innerHTML = options ? 
+            '<option value="">Selecione</option>' + options : 
+            '<option value="">Sem unidades disponíveis</option>';
+        
+        priceInput.value = product.precoVenda.toFixed(2);
+    },
+
+    addItemToSale() {
+        const modelId = document.getElementById('sale-product-model').value;
+        const identifier = document.getElementById('sale-product-identifier').value;
+        const price = parseFloat(document.getElementById('sale-price').value);
+
+        if (!modelId || !identifier || isNaN(price) || price < 0) {
+            Utils.showNotification('Selecione modelo, identificador e defina um preço válido.', 'error');
+            return;
+        }
+
+        AppState.currentSaleItems.push({
+            modelId: modelId,
+            identifier: identifier,
+            price: price,
+            nome: AppState.products[modelId].nome,
+            imagem: AppState.products[modelId].imagem
+        });
+
+        this.updateSaleItemsList();
+        this.populateSaleIdentifiers(); // Atualizar lista de identificadores disponíveis
+        Utils.showNotification('Item adicionado à venda!', 'success');
+    },
+
+    updateSaleItemsList() {
+        let total = 0;
+        const itemsList = document.getElementById('sale-items-list');
+        
+        itemsList.innerHTML = AppState.currentSaleItems.map((item, index) => {
+            total += item.price;
+            return `
+                <div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                    <span>${item.nome} (S/N: ${item.identifier}) - ${Utils.formatCurrency(item.price)}</span>
+                    <button class="text-red-400 hover:text-red-600 remove-sale-item-button" data-index="${index}">
+                        &times;
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+        document.getElementById('sale-total').textContent = Utils.formatCurrency(total);
+    },
+
+    removeItemFromSale(itemIndex) {
+        AppState.currentSaleItems.splice(itemIndex, 1);
+        this.updateSaleItemsList();
+        this.populateSaleIdentifiers();
+    },
+
+    async saveManualSale() {
+        const customerId = document.getElementById('sale-customer').value;
+        const saleDate = document.getElementById('sale-date').value;
+        const paymentMethod = document.getElementById('sale-payment-method').value;
+        const installments = parseInt(document.getElementById('sale-installments').value) || 1;
+        const firstDueDate = document.getElementById('sale-first-due-date').value;
+        const customer = AppState.customers[customerId];
+
+        if (!customerId || !saleDate || AppState.currentSaleItems.length === 0) {
+            Utils.showNotification('Preencha todos os campos da venda e adicione itens.', 'error');
+            return;
+        }
+
+        // Validar campos de pagamento
+        if (['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(paymentMethod) && !firstDueDate) {
+            Utils.showNotification('Para esta forma de pagamento, a data do primeiro vencimento é obrigatória.', 'error');
+            return;
+        }
+
+        const total = AppState.currentSaleItems.reduce((sum, item) => sum + item.price, 0);
+
+        try {
+            // Atualizar status dos produtos
+            const updates = {};
+            const saleItemsForDB = {};
+            
+            for (const item of AppState.currentSaleItems) {
+                updates[`/produtos/${item.modelId}/unidades/${item.identifier}/status`] = 'vendido';
+                saleItemsForDB[item.identifier] = {
+                    modelId: item.modelId,
+                    nome: item.nome,
+                    imagem: item.imagem,
+                    precoVenda: item.price,
+                    identifier: item.identifier
+                };
+            }
+            
+            await database.ref().update(updates);
+            
+            // Criar venda
+            const saleData = {
+                clienteId: customerId,
+                cliente: customer.nome,
+                whatsapp: customer.whatsapp,
+                itens: saleItemsForDB,
+                total: total,
+                data: new Date(saleDate + 'T12:00:00Z').toISOString(),
+                status: 'Concluída',
+                pagamento: {
+                    metodo: paymentMethod,
+                    parcelas: installments,
+                    status: 'A Receber'
+                }
+            };
+            
+            const newSaleRef = await database.ref('vendas').push(saleData);
+
+            // Criar contas a receber com parcelas
+            const installmentValue = total / installments;
+            const dueDate = firstDueDate || saleDate;
+            
+            for (let i = 1; i <= installments; i++) {
+                const installmentDueDate = new Date(dueDate + 'T12:00:00Z');
+                installmentDueDate.setMonth(installmentDueDate.getMonth() + (i - 1));
+
+                await database.ref('contasReceber').push({
+                    vendaId: newSaleRef.key,
+                    clienteId: customerId,
+                    clienteNome: customer.nome,
+                    descricao: `Parcela ${i}/${installments} - Venda #${newSaleRef.key.slice(-5)}`,
+                    valor: installmentValue,
+                    dataVencimento: installmentDueDate.toISOString().split('T')[0],
+                    status: 'Pendente'
+                });
+            }
+            
+            Utils.showNotification('Venda manual gerada com sucesso!', 'success');
+            UI.toggleModal(DOM.manualSaleModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar venda:", error);
+            Utils.showNotification('Erro ao salvar venda: ' + error.message, 'error');
+        }
+    },
+
+    showSaleDetails(saleId) {
+        const sale = AppState.salesHistory[saleId];
+        if (!sale) return;
+
+        const itemsList = Object.values(sale.itens).map(item => 
+            `<div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                <div>
+                    <div class="font-semibold">${item.nome}</div>
+                    <div class="text-sm text-gray-400">S/N: ${item.identifier}</div>
+                </div>
+                <div class="text-right">
+                    <div class="font-semibold">${Utils.formatCurrency(item.precoVenda)}</div>
+                </div>
+            </div>`
+        ).join('');
+
+        const paymentInfo = sale.pagamento ? 
+            `<div class="bg-gray-700 p-3 rounded">
+                <div class="font-semibold">Informações de Pagamento</div>
+                <div class="text-sm text-gray-400">Método: ${sale.pagamento.metodo}</div>
+                ${sale.pagamento.parcelas ? `<div class="text-sm text-gray-400">Parcelas: ${sale.pagamento.parcelas}x</div>` : ''}
+                <div class="text-sm text-gray-400">Status: ${sale.pagamento.status}</div>
+            </div>` : '';
+
+        const content = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <div class="font-semibold">Cliente</div>
+                        <div class="text-gray-400">${sale.cliente}</div>
+                        <div class="text-sm text-gray-400">${sale.whatsapp}</div>
+                    </div>
+                    <div>
+                        <div class="font-semibold">Data da Venda</div>
+                        <div class="text-gray-400">${Utils.formatDate(sale.data)}</div>
+                        <div class="text-sm">Status: <span class="status-badge status-${sale.status.toLowerCase().replace('í', 'i')}">${sale.status}</span></div>
+                    </div>
+                </div>
+
+                ${paymentInfo}
+
+                <div>
+                    <div class="font-semibold mb-2">Itens Vendidos</div>
+                    <div class="space-y-2">
+                        ${itemsList}
+                    </div>
+                </div>
+
+                <div class="bg-cyan-800 p-3 rounded text-center">
+                    <div class="text-lg font-bold">Total: ${Utils.formatCurrency(sale.total)}</div>
+                </div>
+            </div>
+        `;
+
+        UI.showDetailsModal(`Venda #${saleId.slice(-5)}`, content);
+    },
+
+    showOrderDetails(orderId) {
+        const order = window.pendingOrdersData[orderId];
+        if (!order) return;
+
+        const itemsList = Object.values(order.itens).map(item => 
+            `<div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                <div>
+                    <div class="font-semibold">${item.nome}</div>
+                    <div class="text-sm text-gray-400">Quantidade: ${item.quantity}</div>
+                </div>
+                <div class="text-right">
+                    <div class="font-semibold">${Utils.formatCurrency(item.precoVenda * item.quantity)}</div>
+                    <div class="text-sm text-gray-400">${item.quantity}x ${Utils.formatCurrency(item.precoVenda)}</div>
+                </div>
+            </div>`
+        ).join('');
+
+        const content = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <div class="font-semibold">Cliente</div>
+                        <div class="text-gray-400">${order.cliente}</div>
+                        <div class="text-sm text-gray-400">${order.whatsapp}</div>
+                    </div>
+                    <div>
+                        <div class="font-semibold">Data do Pedido</div>
+                        <div class="text-gray-400">${Utils.formatDate(order.data)}</div>
+                        <div class="text-sm">Status: <span class="status-badge status-pendente">${order.status}</span></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="font-semibold mb-2">Itens do Pedido</div>
+                    <div class="space-y-2">
+                        ${itemsList}
+                    </div>
+                </div>
+
+                <div class="bg-yellow-800 p-3 rounded text-center">
+                    <div class="text-lg font-bold">Total: ${Utils.formatCurrency(order.total)}</div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded confirm-sale-button" 
+                            data-id="${orderId}">Confirmar Venda</button>
+                    <button class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded cancel-order-button" 
+                            data-id="${orderId}">Cancelar Pedido</button>
+                </div>
+            </div>
+        `;
+
+        UI.showDetailsModal(`Pedido #${orderId.slice(-5)}`, content);
+    }
+};
+
+// GESTÃO DE COMPRAS
+const Purchases = {
+    loadPurchases() {
+        database.ref('compras').on('value', snapshot => {
+            const purchases = snapshot.val() || {};
+            this.renderPurchases(purchases);
+        });
+    },
+
+    renderPurchases(purchases) {
+        const purchaseEntries = Object.entries(purchases);
+        
+        if (purchaseEntries.length === 0) {
+            DOM.purchaseList.innerHTML = '<p class="empty-state">Nenhuma compra registrada.</p>';
+            return;
+        }
+
+        const tableRows = purchaseEntries.map(([id, purchase]) => {
+            const itemsCount = purchase.itens ? purchase.itens.reduce((sum, item) => sum + item.identifiers.length, 0) : 0;
+            
+            return `
+                <tr class="clickable-row" data-type="purchase" data-id="${id}">
+                    <td>${Utils.formatDate(purchase.dataCompra)}</td>
+                    <td>${purchase.numeroNota}</td>
+                    <td>${purchase.fornecedorNome}</td>
+                    <td class="text-center">${itemsCount}</td>
+                    <td class="font-semibold">${Utils.formatCurrency(purchase.total)}</td>
+                    <td>${purchase.formaPagamento}</td>
+                    <td>
+                        <span class="status-badge ${purchase.status === 'Recebido' ? 'status-concluida' : 'status-pendente'}">
+                            ${purchase.status}
+                        </span>
+                    </td>
+                    <td>
+                        <div class="flex gap-1">
+                            ${purchase.status === 'Aguardando Recebimento' ? 
+                                `<button class="confirm-receipt-button bg-green-600 text-white text-xs px-2 py-1 rounded" 
+                                         data-id="${id}">Receber</button>` : ''}
+                            <button class="delete-purchase-button bg-red-600 text-white text-xs px-2 py-1 rounded" 
+                                    data-id="${id}">Excluir</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.purchaseList.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Nº Nota</th>
+                        <th>Fornecedor</th>
+                        <th>Itens</th>
+                        <th>Total</th>
+                        <th>Pagamento</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    openNewPurchaseModal() {
+        // Carregar fornecedores
+        const supplierSelect = document.getElementById('purchase-supplier');
+        const supplierOptions = Object.entries(AppState.suppliers)
+            .map(([id, supplier]) => `<option value="${id}">${supplier.nome}</option>`)
+            .join('');
+        supplierSelect.innerHTML = '<option value="">Selecione o Fornecedor</option>' + supplierOptions;
+
+        // Carregar produtos
+        const productSelect = document.getElementById('purchase-product');
+        const productOptions = Object.entries(AppState.products)
+            .map(([id, product]) => `<option value="${id}">${product.nome}</option>`)
+            .join('');
+        productSelect.innerHTML = '<option value="">Selecione o Modelo</option>' + productOptions;
+
+        // Configurar campos
+        document.getElementById('purchase-invoice-number').value = '';
+        document.getElementById('purchase-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('purchase-payment-method').value = 'Boleto';
+        document.getElementById('purchase-unit-price').value = '';
+        document.getElementById('purchase-identifiers').value = '';
+        document.getElementById('purchase-installments').value = 1;
+        document.getElementById('purchase-first-due-date').value = new Date().toISOString().split('T')[0];
+        
+        // Limpar itens
+        AppState.currentPurchaseItems = [];
+        this.updatePurchaseItemsList();
+        this.togglePaymentDetails();
+        
+        UI.toggleModal(DOM.purchaseFormModal, true);
+    },
+
+    togglePaymentDetails() {
+        const method = document.getElementById('purchase-payment-method').value;
+        const paymentFields = document.getElementById('payment-details-fields');
+        const show = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(method);
+        paymentFields.classList.toggle('hidden', !show);
+    },
+
+    addItemToPurchase() {
+        const productId = document.getElementById('purchase-product').value;
+        const unitPrice = parseFloat(document.getElementById('purchase-unit-price').value);
+        const identifiersText = document.getElementById('purchase-identifiers').value.trim();
+        
+        if (!productId || isNaN(unitPrice) || unitPrice < 0 || !identifiersText) {
+            Utils.showNotification('Selecione produto, defina custo unitário e insira identificadores.', 'error');
+            return;
+        }
+
+        const identifiers = identifiersText.split('\n').filter(id => id.trim()).map(id => id.trim());
+        
+        if (identifiers.length === 0) {
+            Utils.showNotification('Insira pelo menos um identificador.', 'error');
+            return;
+        }
+
+        AppState.currentPurchaseItems.push({
+            modelId: productId,
+            nome: AppState.products[productId].nome,
+            unitPrice: unitPrice,
+            identifiers: identifiers
+        });
+
+        this.updatePurchaseItemsList();
+        
+        // Limpar campos
+        document.getElementById('purchase-unit-price').value = '';
+        document.getElementById('purchase-identifiers').value = '';
+        
+        Utils.showNotification('Item adicionado à compra!', 'success');
+    },
+
+    updatePurchaseItemsList() {
+        let total = 0;
+        const itemsList = document.getElementById('purchase-items-list');
+        
+        itemsList.innerHTML = AppState.currentPurchaseItems.map((item, index) => {
+            const subtotal = item.identifiers.length * item.unitPrice;
+            total += subtotal;
+            return `
+                <div class="p-3 bg-gray-700 rounded">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="font-semibold">${item.nome}</div>
+                            <div class="text-sm text-gray-400">
+                                ${item.identifiers.length} unidade(s) × ${Utils.formatCurrency(item.unitPrice)} = ${Utils.formatCurrency(subtotal)}
+                            </div>
+                            <div class="text-xs text-gray-400 mt-1">
+                                S/N: ${item.identifiers.join(', ')}
+                            </div>
+                        </div>
+                        <button class="text-red-400 hover:text-red-600 remove-purchase-item-button ml-2" data-index="${index}">
+                            &times;
+                        </button>
                     </div>
                 </div>
             `;
         }).join('');
         
-    ui.cart.total.textContent = `R$ ${total.toFixed(2).replace('.', ',')}`;
-    ui.cart.checkoutButton.disabled = cartEntries.length === 0;
+        document.getElementById('purchase-total').textContent = Utils.formatCurrency(total);
+    },
 
-    if (totalItems > 0) {
-        ui.nav.cartItemCount.textContent = totalItems;
-        ui.nav.cartItemCount.classList.remove('hidden');
-    } else {
-        ui.nav.cartItemCount.classList.add('hidden');
+    removeItemFromPurchase(itemIndex) {
+        AppState.currentPurchaseItems.splice(itemIndex, 1);
+        this.updatePurchaseItemsList();
+    },
+
+    async savePurchase() {
+        const supplierId = document.getElementById('purchase-supplier').value;
+        const invoiceNumber = document.getElementById('purchase-invoice-number').value.trim();
+        const purchaseDate = document.getElementById('purchase-date').value;
+        const paymentMethod = document.getElementById('purchase-payment-method').value;
+        const installments = parseInt(document.getElementById('purchase-installments').value) || 1;
+        const firstDueDate = document.getElementById('purchase-first-due-date').value;
+
+        if (!supplierId || !invoiceNumber || !purchaseDate || AppState.currentPurchaseItems.length === 0) {
+            Utils.showNotification('Preencha todos os campos da compra e adicione itens.', 'error');
+            return;
+        }
+
+        if (['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(paymentMethod) && !firstDueDate) {
+            Utils.showNotification('Para esta forma de pagamento, a data do primeiro vencimento é obrigatória.', 'error');
+            return;
+        }
+
+        const total = AppState.currentPurchaseItems.reduce((sum, item) => sum + (item.identifiers.length * item.unitPrice), 0);
+
+        try {
+            const purchaseData = {
+                fornecedorId: supplierId,
+                fornecedorNome: AppState.suppliers[supplierId].nome,
+                itens: AppState.currentPurchaseItems,
+                total: total,
+                status: 'Aguardando Recebimento',
+                dataRegistro: new Date().toISOString(),
+                numeroNota: invoiceNumber,
+                dataCompra: purchaseDate,
+                formaPagamento: paymentMethod,
+                parcelas: installments
+            };
+            
+            const newPurchaseRef = await database.ref('compras').push(purchaseData);
+            
+            // Criar contas a pagar se necessário
+            if (['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(paymentMethod)) {
+                const installmentValue = total / installments;
+                for (let i = 1; i <= installments; i++) {
+                    const dueDate = new Date(firstDueDate + 'T12:00:00Z');
+                    dueDate.setMonth(dueDate.getMonth() + (i - 1));
+
+                    await database.ref('contasPagar').push({
+                        compraId: newPurchaseRef.key,
+                        fornecedorId: supplierId,
+                        fornecedorNome: AppState.suppliers[supplierId].nome,
+                        descricao: `Parcela ${i}/${installments} - NF #${invoiceNumber}`,
+                        valor: installmentValue,
+                        dataVencimento: dueDate.toISOString().split('T')[0],
+                        status: 'Pendente'
+                    });
+                }
+            }
+            
+            Utils.showNotification('Compra registrada com sucesso!', 'success');
+            UI.toggleModal(DOM.purchaseFormModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar compra:", error);
+            Utils.showNotification('Erro ao salvar compra: ' + error.message, 'error');
+        }
+    },
+
+    async confirmPurchaseReceipt(purchaseId) {
+        const purchaseRef = database.ref('compras/' + purchaseId);
+        
+        try {
+            const purchaseSnapshot = await purchaseRef.once('value');
+            const purchase = purchaseSnapshot.val();
+            
+            if (!purchase) {
+                Utils.showNotification('Compra não encontrada.', 'error');
+                return;
+            }
+
+            if (!confirm('Confirmar o recebimento desta compra? O estoque será atualizado.')) {
+                return;
+            }
+
+            // Atualizar estoque
+            const updates = {};
+            for (const item of purchase.itens) {
+                for (const identifier of item.identifiers) {
+                    updates[`/produtos/${item.modelId}/unidades/${identifier}`] = { 
+                        status: 'disponivel',
+                        dataEntrada: new Date().toISOString(),
+                        compraId: purchaseId,
+                        custoCompra: item.unitPrice
+                    };
+                }
+            }
+            await database.ref().update(updates);
+
+            // Atualizar status da compra
+            await purchaseRef.update({ status: 'Recebido', dataRecebimento: new Date().toISOString() });
+            
+            Utils.showNotification('Recebimento confirmado e estoque atualizado!', 'success');
+            
+        } catch (error) {
+            console.error("Erro ao confirmar recebimento:", error);
+            Utils.showNotification('Erro ao confirmar recebimento: ' + error.message, 'error');
+        }
+    },
+
+    async deletePurchase(purchaseId) {
+        const purchaseRef = database.ref('compras/' + purchaseId);
+        
+        try {
+            const purchaseSnapshot = await purchaseRef.once('value');
+            const purchase = purchaseSnapshot.val();
+            
+            if (!purchase) return;
+
+            if (purchase.status === 'Recebido') {
+                Utils.showNotification('Não é possível excluir uma compra que já foi recebida.', 'error');
+                return;
+            }
+
+            if (confirm(`Tem certeza que deseja excluir a compra da NF #${purchase.numeroNota}?`)) {
+                await purchaseRef.remove();
+                Utils.showNotification('Compra excluída com sucesso!', 'success');
+            }
+            
+        } catch (error) {
+            console.error("Erro ao excluir compra:", error);
+            Utils.showNotification('Erro ao excluir compra: ' + error.message, 'error');
+        }
+    },
+
+    showPurchaseDetails(purchaseId) {
+        // Implementar detalhes da compra
+        database.ref('compras/' + purchaseId).once('value', snapshot => {
+            const purchase = snapshot.val();
+            if (!purchase) return;
+
+            const itemsList = purchase.itens.map(item => 
+                `<div class="p-2 bg-gray-700 rounded mb-2">
+                    <div class="font-semibold">${item.nome}</div>
+                    <div class="text-sm text-gray-400">
+                        ${item.identifiers.length} unidade(s) × ${Utils.formatCurrency(item.unitPrice)} = ${Utils.formatCurrency(item.identifiers.length * item.unitPrice)}
+                    </div>
+                    <div class="text-xs text-gray-400">S/N: ${item.identifiers.join(', ')}</div>
+                </div>`
+            ).join('');
+
+            const content = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">Fornecedor</div>
+                            <div class="text-gray-400">${purchase.fornecedorNome}</div>
+                        </div>
+                        <div>
+                            <div class="font-semibold">Nota Fiscal</div>
+                            <div class="text-gray-400">#${purchase.numeroNota}</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">Data da Compra</div>
+                            <div class="text-gray-400">${Utils.formatDate(purchase.dataCompra)}</div>
+                        </div>
+                        <div>
+                            <div class="font-semibold">Forma de Pagamento</div>
+                            <div class="text-gray-400">${purchase.formaPagamento} ${purchase.parcelas ? `(${purchase.parcelas}x)` : ''}</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="font-semibold">Status</div>
+                        <span class="status-badge ${purchase.status === 'Recebido' ? 'status-concluida' : 'status-pendente'}">
+                            ${purchase.status}
+                        </span>
+                    </div>
+
+                    <div>
+                        <div class="font-semibold mb-2">Itens Comprados</div>
+                        <div class="space-y-2">
+                            ${itemsList}
+                        </div>
+                    </div>
+
+                    <div class="bg-cyan-800 p-3 rounded text-center">
+                        <div class="text-lg font-bold">Total: ${Utils.formatCurrency(purchase.total)}</div>
+                    </div>
+
+                    ${purchase.status === 'Aguardando Recebimento' ? 
+                        `<div class="flex gap-2">
+                            <button class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded confirm-receipt-button" 
+                                    data-id="${purchaseId}">Confirmar Recebimento</button>
+                        </div>` : ''}
+                </div>
+            `;
+
+            UI.showDetailsModal(`Compra NF #${purchase.numeroNota}`, content);
+        });
     }
-}
+};
 
-async function submitCheckout() {
-    const name = ui.checkout.nameInput.value.trim();
-    const whatsapp = ui.checkout.whatsappInput.value.trim();
+// GESTÃO DE CLIENTES
+const Customers = {
+    loadCustomers() {
+        database.ref('clientes').on('value', snapshot => {
+            AppState.customers = snapshot.val() || {};
+            this.renderCustomers();
+        });
+    },
 
-    if (!name || !whatsapp || Object.keys(cart).length === 0) {
-        alert('Por favor, preencha todos os campos e adicione itens ao carrinho.');
-        return;
-    }
+    renderCustomers() {
+        const customerEntries = Object.entries(AppState.customers);
+        
+        if (customerEntries.length === 0) {
+            DOM.customerList.innerHTML = '<p class="empty-state">Nenhum cliente cadastrado.</p>';
+            return;
+        }
 
-    const newCustomerData = {
-        nome: name,
-        nome_lowercase: name.toLowerCase(),
-        whatsapp: whatsapp,
-        dataCadastro: new Date().toISOString()
-    };
-    const newCustomerRef = await database.ref('clientes').push(newCustomerData);
-    const customerId = newCustomerRef.key;
-
-    const order = {
-        clienteId: customerId,
-        cliente: name,
-        whatsapp: whatsapp,
-        itens: cart,
-        total: Object.values(cart).reduce((sum, item) => sum + item.quantity * item.precoVenda, 0),
-        status: 'pendente',
-        data: new Date().toISOString()
-    };
-
-    database.ref('pedidos').push(order).then(() => {
-        alert('Pedido realizado com sucesso! Nossa equipe entrará em contato.');
-        cart = {};
-        updateCartDisplay();
-        toggleModal(ui.checkout.modal, false);
-        ui.checkout.nameInput.value = '';
-        ui.checkout.whatsappInput.value = '';
-    }).catch(error => {
-        console.error("Erro no checkout:", error);
-        alert('Erro ao realizar pedido: ' + error.message);
-    });
-}
-
-// --- MÓDULO: CLIENTES (CRM) ---
-function openNewCustomerModal() {
-    ui.erp.customers.title.textContent = 'Adicionar Novo Cliente';
-    ui.erp.customers.idInput.value = '';
-    ui.erp.customers.nameInput.value = '';
-    ui.erp.customers.whatsappInput.value = '';
-    ui.erp.customers.emailInput.value = '';
-    ui.erp.customers.notesInput.value = '';
-    toggleModal(ui.erp.customers.modal, true);
-}
-
-function openEditCustomerModal(customerId) {
-    const customer = customers[customerId];
-    if (customer) {
-        ui.erp.customers.title.textContent = 'Editar Cliente';
-        ui.erp.customers.idInput.value = customerId;
-        ui.erp.customers.nameInput.value = customer.nome;
-        ui.erp.customers.whatsappInput.value = customer.whatsapp;
-        ui.erp.customers.emailInput.value = customer.email || '';
-        ui.erp.customers.notesInput.value = customer.observacoes || '';
-        toggleModal(ui.erp.customers.modal, true);
-    }
-}
-
-function saveCustomer() {
-    const id = ui.erp.customers.idInput.value;
-    const name = ui.erp.customers.nameInput.value.trim();
-    const whatsapp = ui.erp.customers.whatsappInput.value.trim();
-    const email = ui.erp.customers.emailInput.value.trim();
-    const notes = ui.erp.customers.notesInput.value.trim();
-
-    if (!name || !whatsapp) {
-        alert('Nome e WhatsApp são obrigatórios.');
-        return;
-    }
-
-    const customerData = {
-        nome: name,
-        nome_lowercase: name.toLowerCase(),
-        whatsapp: whatsapp,
-        email: email,
-        observacoes: notes,
-        dataCadastro: new Date().toISOString()
-    };
-    
-    const dbRef = id ? database.ref('clientes/' + id) : database.ref('clientes').push();
-    dbRef.set(customerData).then(() => {
-        alert(`Cliente ${id ? 'atualizado' : 'salvo'} com sucesso!`);
-        toggleModal(ui.erp.customers.modal, false);
-    }).catch(error => alert(`Erro ao salvar cliente: ${error.message}`));
-}
-
-function deleteCustomer(customerId) {
-    if (confirm('Tem a certeza de que deseja excluir este cliente? Esta ação não pode ser desfeita.')) {
-        database.ref('clientes/' + customerId).remove()
-            .then(() => alert('Cliente excluído com sucesso!'))
-            .catch(error => alert('Erro ao excluir cliente: ' + error.message));
-    }
-}
-
-function loadCustomerManagement() {
-    database.ref('clientes').on('value', snapshot => {
-        customers = snapshot.val() || {};
-        const tableBody = Object.entries(customers).map(([id, c]) => `
-            <tr>
-                <td>${c.nome}</td>
-                <td>${c.whatsapp}</td>
-                <td>${c.email || 'N/A'}</td>
+        const tableRows = customerEntries.map(([id, customer]) => `
+            <tr class="clickable-row" data-type="customer" data-id="${id}">
                 <td>
-                    <button class="edit-customer-button bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded" data-id="${id}">Editar</button>
-                    <button class="delete-customer-button bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded ml-2" data-id="${id}">Excluir</button>
+                    <div class="font-semibold">${customer.nome}</div>
+                    <div class="text-sm text-gray-400">${Utils.formatDate(customer.dataCadastro)}</div>
+                </td>
+                <td>${customer.whatsapp}</td>
+                <td>${customer.email || 'N/A'}</td>
+                <td class="max-w-xs text-truncate">${customer.observacoes || 'Nenhuma'}</td>
+                <td>
+                    <div class="flex gap-1">
+                        <button class="edit-customer-button bg-blue-600 text-white text-xs px-2 py-1 rounded" 
+                                data-id="${id}">Editar</button>
+                        <button class="delete-customer-button bg-red-600 text-white text-xs px-2 py-1 rounded" 
+                                data-id="${id}">Excluir</button>
+                    </div>
                 </td>
             </tr>
         `).join('');
 
-        ui.erp.customers.list.innerHTML = `
-            <table class="w-full text-sm">
-                <thead><tr><th>Nome</th><th>WhatsApp</th><th>E-mail</th><th>Ações</th></tr></thead>
-                <tbody>${tableBody || '<tr><td colspan="4" class="text-center">Nenhum cliente cadastrado.</td></tr>'}</tbody>
+        DOM.customerList.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>WhatsApp</th>
+                        <th>E-mail</th>
+                        <th>Observações</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
             </table>
         `;
-    });
-}
+    },
 
-// --- MÓDULO: VENDAS (ERP) ---
-function openNewSaleModal() {
-    if (Object.keys(customers).length === 0 || Object.keys(products).length === 0) {
-        alert("É necessário ter pelo menos um cliente e um produto cadastrado para gerar uma venda.");
-        return;
-    }
-    
-    const customerOptions = Object.entries(customers).map(([id, c]) => `<option value="${id}">${c.nome}</option>`).join('');
-    ui.erp.sales.customerSelect.innerHTML = `<option value="">Selecione um Cliente</option>${customerOptions}`;
+    openNewCustomerModal() {
+        document.getElementById('customer-form-title').textContent = 'Novo Cliente';
+        document.getElementById('customer-id').value = '';
+        document.getElementById('new-customer-name').value = '';
+        document.getElementById('new-customer-whatsapp').value = '';
+        document.getElementById('new-customer-email').value = '';
+        document.getElementById('new-customer-notes').value = '';
+        UI.toggleModal(DOM.customerFormModal, true);
+    },
 
-    const productModelOptions = Object.entries(products)
-        .filter(([id, p]) => p.unidades && Object.values(p.unidades).some(u => u.status === 'disponivel'))
-        .map(([id, p]) => `<option value="${id}">${p.nome}</option>`).join('');
-    ui.erp.sales.productModelSelect.innerHTML = `<option value="">Selecione um Modelo</option>${productModelOptions}`;
+    openEditCustomerModal(customerId) {
+        const customer = AppState.customers[customerId];
+        if (!customer) return;
 
-    ui.erp.sales.productIdentifierSelect.innerHTML = '';
-    ui.erp.sales.priceInput.value = '';
-    ui.erp.sales.dateInput.value = new Date().toISOString().split('T')[0];
-    
-    currentSaleItems = [];
-    updateSaleItemsList();
-    toggleModal(ui.erp.sales.manualSaleModal, true);
-}
+        document.getElementById('customer-form-title').textContent = 'Editar Cliente';
+        document.getElementById('customer-id').value = customerId;
+        document.getElementById('new-customer-name').value = customer.nome;
+        document.getElementById('new-customer-whatsapp').value = customer.whatsapp;
+        document.getElementById('new-customer-email').value = customer.email || '';
+        document.getElementById('new-customer-notes').value = customer.observacoes || '';
+        UI.toggleModal(DOM.customerFormModal, true);
+    },
 
-function populateSaleIdentifiers() {
-    const modelId = ui.erp.sales.productModelSelect.value;
-    const identifierSelect = ui.erp.sales.productIdentifierSelect;
-    const priceInput = ui.erp.sales.priceInput;
+    async saveCustomer() {
+        const id = document.getElementById('customer-id').value;
+        const name = document.getElementById('new-customer-name').value.trim();
+        const whatsapp = document.getElementById('new-customer-whatsapp').value.trim();
+        const email = document.getElementById('new-customer-email').value.trim();
+        const notes = document.getElementById('new-customer-notes').value.trim();
 
-    identifierSelect.innerHTML = '<option value="">Carregando...</option>';
-    priceInput.value = '';
+        if (!Utils.validateForm([
+            document.getElementById('new-customer-name'),
+            document.getElementById('new-customer-whatsapp')
+        ])) {
+            Utils.showNotification('Por favor, preencha todos os campos obrigatórios.', 'error');
+            return;
+        }
 
-    if (!modelId) {
-        identifierSelect.innerHTML = '';
-        return;
-    }
+        try {
+            const customerData = {
+                nome: name,
+                nome_lowercase: name.toLowerCase(),
+                whatsapp: whatsapp,
+                email: email,
+                observacoes: notes,
+                dataAtualizacao: new Date().toISOString()
+            };
 
-    const product = products[modelId];
-    const availableUnits = product.unidades ? Object.keys(product.unidades).filter(id => product.unidades[id].status === 'disponivel') : [];
-    
-    const alreadyAdded = currentSaleItems.map(item => item.identifier);
-    const options = availableUnits
-        .filter(id => !alreadyAdded.includes(id))
-        .map(id => `<option value="${id}">${id}</option>`).join('');
-
-    identifierSelect.innerHTML = options ? `<option value="">Selecione</option>${options}` : '<option value="">Sem unidades</option>';
-    priceInput.value = product.precoVenda.toFixed(2);
-}
-
-function addItemToSale() {
-    const modelId = ui.erp.sales.productModelSelect.value;
-    const identifier = ui.erp.sales.productIdentifierSelect.value;
-    const price = parseFloat(ui.erp.sales.priceInput.value);
-
-    if (!modelId || !identifier || isNaN(price) || price < 0) {
-        alert("Selecione modelo, identificador e defina um preço válido.");
-        return;
-    }
-
-    currentSaleItems.push({
-        modelId: modelId,
-        identifier: identifier,
-        price: price,
-        nome: products[modelId].nome,
-        imagem: products[modelId].imagem
-    });
-    updateSaleItemsList();
-    populateSaleIdentifiers(); // Atualiza a lista de identificadores disponíveis
-}
-
-function updateSaleItemsList() {
-    let total = 0;
-    ui.erp.sales.itemsList.innerHTML = currentSaleItems.map((item, index) => {
-        total += item.price;
-        return `<div class="flex justify-between items-center p-2 bg-gray-700 rounded mb-1">
-                    <span>${item.nome} (S/N: ${item.identifier}) - R$ ${item.price.toFixed(2)}</span>
-                    <button class="text-red-400 hover:text-red-600 remove-sale-item-button" data-index="${index}">&times;</button>
-                </div>`;
-    }).join('');
-    ui.erp.sales.total.textContent = `R$ ${total.toFixed(2)}`;
-}
-
-function removeItemFromSale(itemIndex) {
-    currentSaleItems.splice(itemIndex, 1);
-    updateSaleItemsList();
-    populateSaleIdentifiers();
-}
-
-async function saveManualSale() {
-    const customerId = ui.erp.sales.customerSelect.value;
-    const saleDate = ui.erp.sales.dateInput.value;
-    const paymentMethod = ui.erp.sales.paymentMethodSelect.value;
-    const customer = customers[customerId];
-
-    if (!customerId || !saleDate || currentSaleItems.length === 0) {
-        alert("Preencha todos os campos da venda (cliente, data) e adicione itens.");
-        return;
-    }
-
-    const total = currentSaleItems.reduce((sum, item) => sum + item.price, 0);
-
-    const updates = {};
-    const saleItemsForDB = {};
-    for (const item of currentSaleItems) {
-        updates[`/estoque/${item.modelId}/unidades/${item.identifier}/status`] = 'vendido';
-        saleItemsForDB[item.identifier] = {
-            modelId: item.modelId,
-            nome: item.nome,
-            imagem: item.imagem,
-            precoVenda: item.price,
-            identifier: item.identifier
-        };
-    }
-    
-    try {
-        await database.ref().update(updates);
-        
-        const saleData = {
-            clienteId: customerId,
-            cliente: customer.nome,
-            whatsapp: customer.whatsapp,
-            itens: saleItemsForDB,
-            total: total,
-            data: new Date(saleDate + 'T12:00:00Z').toISOString(),
-            status: 'Concluída',
-            pagamento: {
-                metodo: paymentMethod,
-                status: 'Pendente' // Manual sales might need confirmation or direct entry
+            if (!id) {
+                customerData.dataCadastro = new Date().toISOString();
             }
-        };
-        const newSaleRef = await database.ref('vendas').push(saleData);
 
-        await database.ref('contasReceber').push({
-            vendaId: newSaleRef.key,
-            clienteId: customerId,
-            clienteNome: customer.nome,
-            descricao: `Venda Manual #${newSaleRef.key.slice(-5)}`,
-            valor: total,
-            dataVencimento: saleDate,
-            status: 'Pendente'
-        });
-        
-        alert("Venda manual gerada com sucesso!");
-        toggleModal(ui.erp.sales.manualSaleModal, false);
-    } catch(error) {
-        alert('Erro ao salvar venda: ' + error.message);
-    }
-}
+            const dbRef = id ? database.ref('clientes/' + id) : database.ref('clientes').push();
+            await dbRef.set(customerData);
 
+            Utils.showNotification(`Cliente ${id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
+            UI.toggleModal(DOM.customerFormModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar cliente:", error);
+            Utils.showNotification('Erro ao salvar cliente: ' + error.message, 'error');
+        }
+    },
 
-function loadSales() {
-    database.ref('pedidos').orderByChild('status').equalTo('pendente').on('value', snapshot => {
-        const orders = snapshot.val() || {};
-        window.pendingOrdersData = orders;
-        const tableBody = Object.entries(orders).map(([id, order]) => {
-            const itemsList = Object.values(order.itens).map(item => `${item.nome} (${item.quantity})`).join(', ');
-            return `
-                <tr>
-                    <td>${new Date(order.data).toLocaleDateString()}</td>
-                    <td>${order.cliente}</td>
-                    <td>${order.whatsapp}</td>
-                    <td class="text-xs">${itemsList}</td>
-                    <td>R$ ${order.total.toFixed(2).replace('.',',')}</td>
-                    <td>
-                        <button class="confirm-sale-button bg-green-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Confirmar</button>
-                        <button class="cancel-order-button bg-red-600 text-white text-xs px-2 py-1 rounded ml-2" data-id="${id}">Cancelar</button>
-                    </td>
-                </tr>`;
-        }).join('');
-        
-        ui.erp.sales.pendingOrders.innerHTML = Object.keys(orders).length > 0 ? `
-            <table class="w-full text-sm">
-                <thead><tr><th>Data</th><th>Cliente</th><th>WhatsApp</th><th>Itens</th><th>Total</th><th>Ações</th></tr></thead>
-                <tbody>${tableBody}</tbody>
-            </table>` : '<p>Nenhum pedido pendente.</p>';
-    });
-}
+    async deleteCustomer(customerId) {
+        const customer = AppState.customers[customerId];
+        if (!customer) return;
 
-function loadSalesHistory() {
-    database.ref('vendas').limitToLast(100).on('value', snapshot => {
-        salesHistory = snapshot.val() || {};
-        renderSalesHistory(salesHistory);
-    });
-}
-
-function applySalesHistoryFilter() {
-    const productFilter = ui.erp.sales.historyFilterProduct.value.toLowerCase().trim();
-    const identifierFilter = ui.erp.sales.historyFilterIdentifier.value.toLowerCase().trim();
-
-    if (!productFilter && !identifierFilter) {
-        renderSalesHistory(salesHistory);
-        return;
-    }
-
-    const filteredSales = {};
-    for (const saleId in salesHistory) {
-        const sale = salesHistory[saleId];
-        let match = false;
-        for (const itemId in sale.itens) {
-            const item = sale.itens[itemId];
-            const nameMatch = productFilter && item.nome.toLowerCase().includes(productFilter);
-            const identifierMatch = identifierFilter && item.identifier.toLowerCase().includes(identifierFilter);
-            if ((productFilter && identifierFilter && nameMatch && identifierMatch) || 
-                (productFilter && !identifierFilter && nameMatch) ||
-                (!productFilter && identifierFilter && identifierMatch)) {
-                match = true;
-                break;
+        if (confirm(`Tem certeza que deseja excluir o cliente "${customer.nome}"?`)) {
+            try {
+                await database.ref('clientes/' + customerId).remove();
+                Utils.showNotification('Cliente excluído com sucesso!', 'success');
+            } catch (error) {
+                Utils.showNotification('Erro ao excluir cliente: ' + error.message, 'error');
             }
         }
-        if (match) {
-            filteredSales[saleId] = sale;
-        }
-    }
-    renderSalesHistory(filteredSales);
-}
+    },
 
-function renderSalesHistory(salesData) {
-    const reversedSales = Object.entries(salesData).reverse();
+    showCustomerDetails(customerId) {
+        const customer = AppState.customers[customerId];
+        if (!customer) return;
 
-    if (reversedSales.length === 0) {
-        ui.erp.sales.historyList.innerHTML = '<p>Nenhuma venda encontrada com os filtros atuais.</p>';
-        return;
-    }
+        // Buscar histórico de compras do cliente
+        database.ref('vendas').orderByChild('clienteId').equalTo(customerId).once('value', snapshot => {
+            const sales = snapshot.val() || {};
+            const salesList = Object.entries(sales).map(([saleId, sale]) => 
+                `<div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                    <div>
+                        <div class="text-sm">${Utils.formatDate(sale.data)}</div>
+                        <div class="text-xs text-gray-400">#${saleId.slice(-5)}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-semibold">${Utils.formatCurrency(sale.total)}</div>
+                        <div class="text-xs text-gray-400">${sale.pagamento?.metodo || 'N/A'}</div>
+                    </div>
+                </div>`
+            ).join('');
 
-    const tableBody = reversedSales.map(([id, sale]) => {
-        const itemsList = Object.values(sale.itens).map(item => 
-            `<div>${item.nome} (S/N: ${item.identifier}) - R$ ${item.precoVenda.toFixed(2)}</div>`
-        ).join('');
-        return `
-            <tr>
-                <td>${new Date(sale.data).toLocaleDateString()}</td>
-                <td>${sale.cliente}</td>
-                <td>${sale.pagamento?.metodo || 'N/A'} (${sale.pagamento?.parcelas || 1}x)</td>
-                <td class="text-xs">${itemsList}</td>
-                <td>R$ ${sale.total.toFixed(2).replace('.',',')}</td>
-            </tr>`;
-    }).join('');
-    
-    ui.erp.sales.historyList.innerHTML = `
-        <table class="w-full text-sm">
-            <thead><tr><th>Data</th><th>Cliente</th><th>Pagamento</th><th>Itens</th><th>Total</th></tr></thead>
-            <tbody>${tableBody}</tbody>
-        </table>`;
-}
+            const totalPurchases = Object.values(sales).reduce((sum, sale) => sum + sale.total, 0);
 
-function openPaymentConfirmationModal(orderId) {
-    currentOrderToConfirm = { id: orderId, ...window.pendingOrdersData[orderId] };
-    const order = currentOrderToConfirm;
-    
-    ui.paymentConfirmationModal.itemsContainer.innerHTML = '';
-    
-    let itemIndex = 0;
-    for (const modelId in order.itens) {
-        const item = order.itens[modelId];
-        for (let i = 0; i < item.quantity; i++) {
-            const product = products[item.id];
-            const availableUnits = product.unidades ? Object.keys(product.unidades).filter(id => product.unidades[id].status === 'disponivel') : [];
-            const options = availableUnits.map(uid => `<option value="${uid}">${uid}</option>`).join('');
-
-            const itemHtml = `
-                <div class="p-3 bg-gray-700 rounded" data-item-index="${itemIndex}">
-                    <p class="font-semibold">${item.nome} (#${i+1})</p>
-                    <div class="grid grid-cols-2 gap-4 mt-2">
+            const content = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs mb-1">Identificador (S/N)</label>
-                            <select class="form-input w-full confirm-item-identifier" data-model-id="${item.id}">
-                                <option value="">Selecione...</option>
-                                ${options}
-                            </select>
+                            <div class="font-semibold">Nome Completo</div>
+                            <div class="text-gray-400">${customer.nome}</div>
                         </div>
                         <div>
-                            <label class="block text-xs mb-1">Preço Final (R$)</label>
-                            <input type="number" step="0.01" class="form-input w-full confirm-item-price" value="${item.precoVenda.toFixed(2)}">
+                            <div class="font-semibold">WhatsApp</div>
+                            <div class="text-gray-400">${customer.whatsapp}</div>
                         </div>
                     </div>
-                </div>`;
-            ui.paymentConfirmationModal.itemsContainer.innerHTML += itemHtml;
-            itemIndex++;
-        }
-    }
 
-    updateConfirmationTotal();
-    const today = new Date().toISOString().split('T')[0];
-    ui.paymentConfirmationModal.firstDueDateInput.value = today;
-    ui.paymentConfirmationModal.installmentsInput.value = 1;
-    ui.paymentConfirmationModal.paymentMethodSelect.value = 'Pix';
-    toggleInstallmentFields();
-    toggleModal(ui.paymentConfirmationModal.modal, true);
-}
-
-
-function updateConfirmationTotal() {
-    let total = 0;
-    querySelAll('.confirm-item-price').forEach(input => {
-        total += parseFloat(input.value) || 0;
-    });
-    ui.paymentConfirmationModal.total.textContent = `R$ ${total.toFixed(2)}`;
-}
-
-
-function toggleInstallmentFields() {
-    const method = ui.paymentConfirmationModal.paymentMethodSelect.value;
-    const show = method === 'Boleto' || method === 'Cartão de Crédito';
-    ui.paymentConfirmationModal.installmentFields.classList.toggle('hidden', !show);
-}
-
-async function processSaleConfirmation() {
-    if (!currentOrderToConfirm) {
-        alert("Erro: Pedido não encontrado.");
-        return;
-    }
-
-    const orderId = currentOrderToConfirm.id;
-    const order = currentOrderToConfirm;
-    
-    const itemElements = querySelAll('#order-items-to-confirm > div');
-    const finalItems = {};
-    const updates = {};
-    let total = 0;
-
-    for (const el of itemElements) {
-        const identifierSelect = el.querySelector('.confirm-item-identifier');
-        const priceInput = el.querySelector('.confirm-item-price');
-        
-        const identifier = identifierSelect.value;
-        const modelId = identifierSelect.dataset.modelId;
-        const price = parseFloat(priceInput.value);
-
-        if (!identifier || isNaN(price) || price < 0) {
-            alert(`Todos os itens devem ter um identificador selecionado e um preço válido.`);
-            return;
-        }
-        if (updates[`/estoque/${modelId}/unidades/${identifier}/status`]) {
-            alert(`O identificador "${identifier}" foi selecionado mais de uma vez. Por favor, escolha identificadores únicos para cada item.`);
-            return;
-        }
-
-        updates[`/estoque/${modelId}/unidades/${identifier}/status`] = 'vendido';
-        finalItems[identifier] = {
-            modelId: modelId,
-            identifier: identifier,
-            nome: products[modelId].nome,
-            imagem: products[modelId].imagem,
-            precoVenda: price
-        };
-        total += price;
-    }
-
-    const paymentMethod = ui.paymentConfirmationModal.paymentMethodSelect.value;
-    const installments = parseInt(ui.paymentConfirmationModal.installmentsInput.value) || 1;
-    const firstDueDate = ui.paymentConfirmationModal.firstDueDateInput.value;
-    
-    if ((paymentMethod === 'Boleto' || paymentMethod === 'Cartão de Crédito') && !firstDueDate) {
-        alert("Para esta forma de pagamento, a data do primeiro vencimento é obrigatória.");
-        return;
-    }
-
-    try {
-        await database.ref().update(updates);
-
-        const saleData = {
-            clienteId: order.clienteId,
-            cliente: order.cliente,
-            whatsapp: order.whatsapp,
-            itens: finalItems,
-            total: total,
-            data: new Date().toISOString(),
-            status: 'Concluída',
-            pagamento: {
-                metodo: paymentMethod,
-                parcelas: installments,
-                status: 'A Receber'
-            }
-        };
-        
-        const newSaleRef = await database.ref('vendas').push(saleData);
-        
-        const installmentValue = total / installments;
-        for (let i = 1; i <= installments; i++) {
-            const dueDate = new Date(firstDueDate + 'T12:00:00Z');
-            dueDate.setMonth(dueDate.getMonth() + (i - 1));
-
-            await database.ref('contasReceber').push({
-                vendaId: newSaleRef.key,
-                clienteId: order.clienteId,
-                clienteNome: order.cliente,
-                descricao: `Parcela ${i}/${installments} - Venda #${newSaleRef.key.slice(-5)}`,
-                valor: installmentValue,
-                dataVencimento: dueDate.toISOString().split('T')[0],
-                status: 'Pendente'
-            });
-        }
-
-        await database.ref('pedidos/' + orderId).remove();
-
-        alert('Venda confirmada com sucesso! As parcelas foram geradas em Contas a Receber.');
-        toggleModal(ui.paymentConfirmationModal.modal, false);
-        currentOrderToConfirm = null;
-
-    } catch (error) {
-        alert('Ocorreu um erro ao processar a venda: ' + error.message);
-    }
-}
-
-
-function cancelOrder(orderId) {
-    if (confirm('Tem a certeza de que deseja cancelar este pedido?')) {
-        database.ref('pedidos/' + orderId).remove().then(() => alert('Pedido cancelado!'));
-    }
-}
-
-// --- MÓDULO: ESTOQUE (ERP) ---
-async function saveProductModel() {
-    const id = ui.erp.stock.idInput.value;
-    const name = ui.erp.stock.nameInput.value;
-    const price = parseFloat(ui.erp.stock.priceInput.value);
-    const description = ui.erp.stock.descriptionInput.value;
-    const alertLevel = parseInt(ui.erp.stock.alertLevelInput.value);
-    const imageFile = ui.erp.stock.imageUploadInput.files[0];
-
-    if (!name || isNaN(price)) {
-        alert('Por favor, preencha nome e preço corretamente.');
-        return;
-    }
-
-    let imageUrl = (id && products[id] && products[id].imagem) || '';
-    if (imageFile) {
-        try {
-            const formData = new FormData();
-            formData.append('file', imageFile);
-            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-            const response = await fetch(CLOUDINARY_API_URL, { method: 'POST', body: formData });
-            const data = await response.json();
-            if (data.secure_url) {
-                imageUrl = data.secure_url;
-            } else {
-                throw new Error(data.error.message || 'Erro desconhecido no upload.');
-            }
-        } catch (error) {
-            console.error("Cloudinary upload error:", error);
-            alert('Erro ao fazer upload da imagem. Tente novamente.');
-            return;
-        }
-    }
-
-    const productData = {
-        nome: name,
-        nome_lowercase: name.toLowerCase(),
-        precoVenda: price,
-        descricao: description,
-        nivelAlertaEstoque: alertLevel || 0,
-        imagem: imageUrl
-    };
-
-    const dbRef = id ? database.ref('estoque/' + id) : database.ref('estoque').push();
-    
-    // Se for um produto existente, não sobrescrever as unidades
-    if(id) {
-         dbRef.update(productData).then(() => {
-            alert(`Modelo de produto atualizado com sucesso!`);
-            toggleModal(ui.erp.stock.modal, false);
-        }).catch(error => alert(`Erro ao salvar modelo: ${error.message}`));
-    } else {
-         dbRef.set(productData).then(() => {
-            alert(`Modelo de produto adicionado com sucesso!`);
-            toggleModal(ui.erp.stock.modal, false);
-        }).catch(error => alert(`Erro ao salvar modelo: ${error.message}`));
-    }
-}
-
-function loadStockManagement() {
-    database.ref('estoque').on('value', snapshot => {
-        products = snapshot.val() || {};
-        renderStockTable(products);
-        updateLowStockAlerts();
-    });
-}
-
-function renderStockTable(data) {
-    const productModels = Object.entries(data);
-    let tableBody = '';
-
-    if (productModels.length === 0) {
-        tableBody = '<tr><td colspan="5" class="text-center">Nenhum modelo de produto cadastrado.</td></tr>';
-    } else {
-        productModels.forEach(([id, p]) => {
-            const units = p.unidades || {};
-            const availableUnits = Object.entries(units).filter(([uid, u]) => u.status === 'disponivel');
-            const soldUnits = Object.entries(units).filter(([uid, u]) => u.status === 'vendido');
-            const availableCount = availableUnits.length;
-            
-            tableBody += `
-                <tr class="bg-gray-800 border-b border-gray-900 align-top">
-                    <td><img src="${p.imagem || 'https://placehold.co/50x50/374151/9ca3af?text=Img'}" alt="${p.nome}" class="w-12 h-12 object-cover rounded"></td>
-                    <td>
-                        <div class="font-bold text-lg">${p.nome}</div>
-                        <div class="text-xs text-gray-400 mt-2">
-                            <b>Disponíveis:</b> ${availableUnits.map(([uid]) => `<span class="bg-gray-600 px-2 py-1 rounded text-xs inline-block mr-1 mb-1">${uid}</span>`).join('') || 'Nenhuma'}
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">E-mail</div>
+                            <div class="text-gray-400">${customer.email || 'Não informado'}</div>
                         </div>
-                         <div class="text-xs text-gray-400 mt-2">
-                            <b>Vendidos:</b> ${soldUnits.map(([uid]) => `<span class="bg-red-900 px-2 py-1 rounded text-xs inline-block mr-1 mb-1">${uid}</span>`).join('') || 'Nenhum'}
+                        <div>
+                            <div class="font-semibold">Data de Cadastro</div>
+                            <div class="text-gray-400">${Utils.formatDate(customer.dataCadastro)}</div>
                         </div>
-                    </td>
-                    <td>R$ ${(p.precoVenda || 0).toFixed(2).replace('.', ',')}</td>
-                    <td class="font-bold text-xl ${availableCount <= (p.nivelAlertaEstoque || 0) ? 'text-red-400' : 'text-green-400'}">${availableCount}</td>
-                    <td>
-                        <button class="edit-product-model-button bg-blue-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Editar Modelo</button>
-                        <button class="add-stock-unit-button bg-green-600 text-white text-xs px-2 py-1 rounded mt-1" data-id="${id}">Adicionar Unidade</button>
-                        <button class="delete-product-model-button bg-red-600 text-white text-xs px-2 py-1 rounded mt-1" data-id="${id}">Excluir Modelo</button>
-                    </td>
-                </tr>`;
+                    </div>
+
+                    ${customer.observacoes ? 
+                        `<div>
+                            <div class="font-semibold">Observações</div>
+                            <div class="text-gray-400 bg-gray-700 p-2 rounded">${customer.observacoes}</div>
+                        </div>` : ''}
+
+                    <div class="bg-cyan-800 p-3 rounded">
+                        <div class="text-center">
+                            <div class="text-lg font-bold">Total em Compras</div>
+                            <div class="text-2xl font-bold">${Utils.formatCurrency(totalPurchases)}</div>
+                            <div class="text-sm text-gray-300">${Object.keys(sales).length} compra(s) realizada(s)</div>
+                        </div>
+                    </div>
+
+                    ${Object.keys(sales).length > 0 ? 
+                        `<div>
+                            <div class="font-semibold mb-2">Histórico de Compras</div>
+                            <div class="space-y-2 max-h-40 overflow-y-auto">
+                                ${salesList}
+                            </div>
+                        </div>` : 
+                        '<div class="text-center text-gray-400">Nenhuma compra realizada ainda</div>'}
+                </div>
+            `;
+
+            UI.showDetailsModal(`Cliente: ${customer.nome}`, content);
         });
     }
+};
 
-    ui.erp.stock.list.innerHTML = `
-        <table class="w-full text-sm">
-            <thead><tr><th>Imagem</th><th>Modelo e Unidades</th><th>Preço Padrão</th><th>Qtd. Disp.</th><th>Ações</th></tr></thead>
-            <tbody>${tableBody}</tbody>
-        </table>
-    `;
-}
+// GESTÃO DE FORNECEDORES
+const Suppliers = {
+    loadSuppliers() {
+        database.ref('fornecedores').on('value', snapshot => {
+            AppState.suppliers = snapshot.val() || {};
+            this.renderSuppliers();
+        });
+    },
 
-function applyStockFilter() {
-    const productFilter = ui.erp.stock.filterProduct.value.toLowerCase().trim();
-    const identifierFilter = ui.erp.stock.filterIdentifier.value.toLowerCase().trim();
-
-    if (!productFilter && !identifierFilter) {
-        renderStockTable(products);
-        return;
-    }
-
-    const filteredProducts = {};
-    for (const modelId in products) {
-        const product = products[modelId];
-        const productNameMatch = product.nome.toLowerCase().includes(productFilter);
+    renderSuppliers() {
+        const supplierEntries = Object.entries(AppState.suppliers);
         
-        const matchingUnits = {};
-        let hasMatchingUnit = false;
-        if (product.unidades) {
-            for (const unitId in product.unidades) {
-                if (unitId.toLowerCase().includes(identifierFilter)) {
-                    matchingUnits[unitId] = product.unidades[unitId];
-                    hasMatchingUnit = true;
+        if (supplierEntries.length === 0) {
+            DOM.supplierList.innerHTML = '<p class="empty-state">Nenhum fornecedor cadastrado.</p>';
+            return;
+        }
+
+        const tableRows = supplierEntries.map(([id, supplier]) => `
+            <tr class="clickable-row" data-type="supplier" data-id="${id}">
+                <td class="font-semibold">${supplier.nome}</td>
+                <td>${supplier.contato || 'N/A'}</td>
+                <td>
+                    <div class="flex gap-1">
+                        <button class="edit-supplier-button bg-blue-600 text-white text-xs px-2 py-1 rounded" 
+                                data-id="${id}">Editar</button>
+                        <button class="delete-supplier-button bg-red-600 text-white text-xs px-2 py-1 rounded" 
+                                data-id="${id}">Excluir</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        DOM.supplierList.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Contato</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    openNewSupplierModal() {
+        document.getElementById('supplier-form-title').textContent = 'Novo Fornecedor';
+        document.getElementById('supplier-id').value = '';
+        document.getElementById('supplier-name').value = '';
+        document.getElementById('supplier-contact').value = '';
+        UI.toggleModal(DOM.supplierFormModal, true);
+    },
+
+    openEditSupplierModal(supplierId) {
+        const supplier = AppState.suppliers[supplierId];
+        if (!supplier) return;
+
+        document.getElementById('supplier-form-title').textContent = 'Editar Fornecedor';
+        document.getElementById('supplier-id').value = supplierId;
+        document.getElementById('supplier-name').value = supplier.nome;
+        document.getElementById('supplier-contact').value = supplier.contato || '';
+        UI.toggleModal(DOM.supplierFormModal, true);
+    },
+
+    async saveSupplier() {
+        const id = document.getElementById('supplier-id').value;
+        const name = document.getElementById('supplier-name').value.trim();
+        const contact = document.getElementById('supplier-contact').value.trim();
+
+        if (!Utils.validateForm([document.getElementById('supplier-name')])) {
+            Utils.showNotification('Por favor, preencha o nome do fornecedor.', 'error');
+            return;
+        }
+
+        try {
+            const supplierData = {
+                nome: name,
+                contato: contact,
+                dataAtualizacao: new Date().toISOString()
+            };
+
+            if (!id) {
+                supplierData.dataCadastro = new Date().toISOString();
+            }
+
+            const dbRef = id ? database.ref('fornecedores/' + id) : database.ref('fornecedores').push();
+            await dbRef.set(supplierData);
+
+            Utils.showNotification(`Fornecedor ${id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
+            UI.toggleModal(DOM.supplierFormModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar fornecedor:", error);
+            Utils.showNotification('Erro ao salvar fornecedor: ' + error.message, 'error');
+        }
+    },
+
+    async deleteSupplier(supplierId) {
+        const supplier = AppState.suppliers[supplierId];
+        if (!supplier) return;
+
+        if (confirm(`Tem certeza que deseja excluir o fornecedor "${supplier.nome}"?`)) {
+            try {
+                await database.ref('fornecedores/' + supplierId).remove();
+                Utils.showNotification('Fornecedor excluído com sucesso!', 'success');
+            } catch (error) {
+                Utils.showNotification('Erro ao excluir fornecedor: ' + error.message, 'error');
+            }
+        }
+    },
+
+    showSupplierDetails(supplierId) {
+        const supplier = AppState.suppliers[supplierId];
+        if (!supplier) return;
+
+        // Buscar histórico de compras do fornecedor
+        database.ref('compras').orderByChild('fornecedorId').equalTo(supplierId).once('value', snapshot => {
+            const purchases = snapshot.val() || {};
+            const purchasesList = Object.entries(purchases).map(([purchaseId, purchase]) => 
+                `<div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                    <div>
+                        <div class="text-sm">NF #${purchase.numeroNota}</div>
+                        <div class="text-xs text-gray-400">${Utils.formatDate(purchase.dataCompra)}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-semibold">${Utils.formatCurrency(purchase.total)}</div>
+                        <div class="text-xs text-gray-400">${purchase.status}</div>
+                    </div>
+                </div>`
+            ).join('');
+
+            const totalPurchases = Object.values(purchases).reduce((sum, purchase) => sum + purchase.total, 0);
+
+            const content = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">Nome</div>
+                            <div class="text-gray-400">${supplier.nome}</div>
+                        </div>
+                        <div>
+                            <div class="font-semibold">Contato</div>
+                            <div class="text-gray-400">${supplier.contato || 'Não informado'}</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-cyan-800 p-3 rounded">
+                        <div class="text-center">
+                            <div class="text-lg font-bold">Total em Compras</div>
+                            <div class="text-2xl font-bold">${Utils.formatCurrency(totalPurchases)}</div>
+                            <div class="text-sm text-gray-300">${Object.keys(purchases).length} compra(s) realizada(s)</div>
+                        </div>
+                    </div>
+
+                    ${Object.keys(purchases).length > 0 ? 
+                        `<div>
+                            <div class="font-semibold mb-2">Histórico de Compras</div>
+                            <div class="space-y-2 max-h-40 overflow-y-auto">
+                                ${purchasesList}
+                            </div>
+                        </div>` : 
+                        '<div class="text-center text-gray-400">Nenhuma compra realizada ainda</div>'}
+                </div>
+            `;
+
+            UI.showDetailsModal(`Fornecedor: ${supplier.nome}`, content);
+        });
+    }
+};
+
+// GESTÃO FINANCEIRA
+const Finance = {
+    loadFinance() {
+        this.loadAccountsReceivable();
+        this.loadAccountsPayable();
+        this.calculateCashBalance();
+    },
+
+    loadAccountsReceivable() {
+        database.ref('contasReceber').orderByChild('dataVencimento').on('value', snapshot => {
+            const accounts = snapshot.val() || {};
+            this.renderAccountsReceivable(accounts);
+        });
+    },
+
+    loadAccountsPayable() {
+        database.ref('contasPagar').orderByChild('dataVencimento').on('value', snapshot => {
+            const accounts = snapshot.val() || {};
+            this.renderAccountsPayable(accounts);
+        });
+    },
+
+    renderAccountsReceivable(accounts) {
+        const accountEntries = Object.entries(accounts);
+        
+        if (accountEntries.length === 0) {
+            DOM.accountsReceivable.innerHTML = '<p class="empty-state">Nenhuma conta a receber.</p>';
+            return;
+        }
+
+        const tableRows = accountEntries.map(([id, account]) => {
+            const isPaid = account.status === 'Recebido';
+            const isOverdue = !isPaid && new Date(account.dataVencimento) < new Date();
+            
+            return `
+                <tr class="clickable-row ${isOverdue ? 'bg-red-900 bg-opacity-20' : ''}" data-type="receivable" data-id="${id}">
+                    <td>${Utils.formatDate(account.dataVencimento)}</td>
+                    <td>${account.clienteNome || 'N/A'}</td>
+                    <td class="max-w-xs text-truncate">${account.descricao}</td>
+                    <td class="font-semibold text-green-400">+ ${Utils.formatCurrency(account.valor)}</td>
+                    <td>
+                        <span class="status-badge ${isPaid ? 'status-concluida' : isOverdue ? 'status-cancelada' : 'status-pendente'}">
+                            ${isPaid ? 'Recebido' : isOverdue ? 'Vencido' : 'Pendente'}
+                        </span>
+                    </td>
+                    <td>
+                        ${!isPaid ? 
+                            `<button class="confirm-transaction-button bg-green-600 text-white text-xs px-2 py-1 rounded" 
+                                     data-id="${id}" data-type="receber">Receber</button>` : 
+                            `<span class="text-xs text-gray-400">Recebido em ${Utils.formatDate(account.dataRecebimento)}</span>`}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.accountsReceivable.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Vencimento</th>
+                        <th>Cliente</th>
+                        <th>Descrição</th>
+                        <th>Valor</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    renderAccountsPayable(accounts) {
+        const accountEntries = Object.entries(accounts);
+        
+        if (accountEntries.length === 0) {
+            DOM.accountsPayable.innerHTML = '<p class="empty-state">Nenhuma conta a pagar.</p>';
+            return;
+        }
+
+        const tableRows = accountEntries.map(([id, account]) => {
+            const isPaid = account.status === 'Paga';
+            const isOverdue = !isPaid && new Date(account.dataVencimento) < new Date();
+            
+            return `
+                <tr class="clickable-row ${isOverdue ? 'bg-red-900 bg-opacity-20' : ''}" data-type="payable" data-id="${id}">
+                    <td>${Utils.formatDate(account.dataVencimento)}</td>
+                    <td>${account.fornecedorNome || account.categoria || 'N/A'}</td>
+                    <td class="max-w-xs text-truncate">${account.descricao}</td>
+                    <td class="font-semibold text-red-400">- ${Utils.formatCurrency(account.valor)}</td>
+                    <td>
+                        <span class="status-badge ${isPaid ? 'status-concluida' : isOverdue ? 'status-cancelada' : 'status-pendente'}">
+                            ${isPaid ? 'Paga' : isOverdue ? 'Vencida' : 'Pendente'}
+                        </span>
+                    </td>
+                    <td>
+                        ${!isPaid ? 
+                            `<button class="confirm-transaction-button bg-blue-600 text-white text-xs px-2 py-1 rounded" 
+                                     data-id="${id}" data-type="pagar">Pagar</button>` : 
+                            `<span class="text-xs text-gray-400">Paga em ${Utils.formatDate(account.dataPagamento)}</span>`}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        DOM.accountsPayable.innerHTML = `
+            <table class="w-full text-sm table-responsive">
+                <thead>
+                    <tr>
+                        <th>Vencimento</th>
+                        <th>Fornecedor/Categoria</th>
+                        <th>Descrição</th>
+                        <th>Valor</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    },
+
+    async calculateCashBalance() {
+        try {
+            const [receivableSnapshot, payableSnapshot] = await Promise.all([
+                database.ref('contasReceber').once('value'),
+                database.ref('contasPagar').once('value')
+            ]);
+
+            const receivables = receivableSnapshot.val() || {};
+            const payables = payableSnapshot.val() || {};
+
+            const totalReceived = Object.values(receivables)
+                .filter(account => account.status === 'Recebido')
+                .reduce((sum, account) => sum + account.valor, 0);
+
+            const totalPaid = Object.values(payables)
+                .filter(account => account.status === 'Paga')
+                .reduce((sum, account) => sum + account.valor, 0);
+
+            const balance = totalReceived - totalPaid;
+            DOM.cashBalance.textContent = Utils.formatCurrency(balance);
+            DOM.cashBalance.className = balance >= 0 ? 'text-green-400' : 'text-red-400';
+
+            // Atualizar dashboard
+            const pendingReceivables = Object.values(receivables)
+                .filter(account => account.status === 'Pendente')
+                .reduce((sum, account) => sum + account.valor, 0);
+            
+            if (DOM.pendingReceivables) {
+                DOM.pendingReceivables.textContent = Utils.formatCurrency(pendingReceivables);
+            }
+
+        } catch (error) {
+            console.error("Erro ao calcular saldo:", error);
+        }
+    },
+
+    async confirmTransaction(accountId, type) {
+        const ref = type === 'receber' ? 'contasReceber' : 'contasPagar';
+        const statusField = type === 'receber' ? 'Recebido' : 'Paga';
+        const dateField = type === 'receber' ? 'dataRecebimento' : 'dataPagamento';
+
+        try {
+            await database.ref(`${ref}/${accountId}`).update({
+                status: statusField,
+                [dateField]: new Date().toISOString()
+            });
+
+            Utils.showNotification(`Transação confirmada com sucesso!`, 'success');
+            this.calculateCashBalance();
+            
+        } catch (error) {
+            console.error("Erro ao confirmar transação:", error);
+            Utils.showNotification('Erro ao confirmar transação: ' + error.message, 'error');
+        }
+    },
+
+    openNewExpenseModal() {
+        document.getElementById('expense-description').value = '';
+        document.getElementById('expense-value').value = '';
+        document.getElementById('expense-due-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('expense-category').value = 'Custo Fixo';
+        UI.toggleModal(DOM.expenseFormModal, true);
+    },
+
+    async saveExpense() {
+        const description = document.getElementById('expense-description').value.trim();
+        const value = parseFloat(document.getElementById('expense-value').value);
+        const dueDate = document.getElementById('expense-due-date').value;
+        const category = document.getElementById('expense-category').value;
+
+        if (!Utils.validateForm([
+            document.getElementById('expense-description'),
+            document.getElementById('expense-value'),
+            document.getElementById('expense-due-date')
+        ]) || isNaN(value) || value <= 0) {
+            Utils.showNotification('Preencha todos os campos corretamente.', 'error');
+            return;
+        }
+
+        try {
+            const expenseData = {
+                descricao: description,
+                categoria: category,
+                valor: value,
+                dataVencimento: dueDate,
+                status: 'Pendente',
+                dataCriacao: new Date().toISOString()
+            };
+
+            await database.ref('contasPagar').push(expenseData);
+            Utils.showNotification('Despesa lançada com sucesso!', 'success');
+            UI.toggleModal(DOM.expenseFormModal, false);
+            
+        } catch (error) {
+            console.error("Erro ao salvar despesa:", error);
+            Utils.showNotification('Erro ao salvar despesa: ' + error.message, 'error');
+        }
+    },
+
+    showAccountDetails(accountId, type) {
+        const ref = type === 'receivable' ? 'contasReceber' : 'contasPagar';
+        
+        database.ref(`${ref}/${accountId}`).once('value', snapshot => {
+            const account = snapshot.val();
+            if (!account) return;
+
+            const isReceivable = type === 'receivable';
+            const isPaid = account.status === (isReceivable ? 'Recebido' : 'Paga');
+            
+            const content = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">${isReceivable ? 'Cliente' : 'Fornecedor/Categoria'}</div>
+                            <div class="text-gray-400">${account.clienteNome || account.fornecedorNome || account.categoria || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="font-semibold">Data de Vencimento</div>
+                            <div class="text-gray-400">${Utils.formatDate(account.dataVencimento)}</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="font-semibold">Descrição</div>
+                        <div class="text-gray-400 bg-gray-700 p-2 rounded">${account.descricao}</div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="font-semibold">Valor</div>
+                            <div class="text-2xl font-bold ${isReceivable ? 'text-green-400' : 'text-red-400'}">
+                                ${isReceivable ? '+' : '-'} ${Utils.formatCurrency(account.valor)}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="font-semibold">Status</div>
+                            <span class="status-badge ${isPaid ? 'status-concluida' : 'status-pendente'}">
+                                ${account.status}
+                            </span>
+                        </div>
+                    </div>
+
+                    ${isPaid ? 
+                        `<div class="bg-green-800 p-3 rounded">
+                            <div class="font-semibold">Data de ${isReceivable ? 'Recebimento' : 'Pagamento'}</div>
+                            <div class="text-gray-300">${Utils.formatDate(account[isReceivable ? 'dataRecebimento' : 'dataPagamento'])}</div>
+                        </div>` : 
+                        `<div class="flex gap-2">
+                            <button class="flex-1 ${isReceivable ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold py-2 px-4 rounded confirm-transaction-button" 
+                                    data-id="${accountId}" data-type="${isReceivable ? 'receber' : 'pagar'}">
+                                ${isReceivable ? 'Confirmar Recebimento' : 'Confirmar Pagamento'}
+                            </button>
+                        </div>`}
+                </div>
+            `;
+
+            UI.showDetailsModal(`${isReceivable ? 'Conta a Receber' : 'Conta a Pagar'} #${accountId.slice(-5)}`, content);
+        });
+    }
+};
+
+// DASHBOARD
+const Dashboard = {
+    updateDashboard() {
+        this.calculateDailySalesAndMonthlyRevenue();
+        this.updateStockCount();
+        this.checkLowStockAlerts();
+    },
+
+    async calculateDailySalesAndMonthlyRevenue() {
+        try {
+            const salesSnapshot = await database.ref('vendas').once('value');
+            const sales = salesSnapshot.val() || {};
+
+            const today = new Date();
+            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+            let dailySales = 0;
+            let monthlyRevenue = 0;
+
+            for (const sale of Object.values(sales)) {
+                const saleDate = new Date(sale.data);
+                
+                if (saleDate >= startOfDay) {
+                    dailySales += sale.total;
+                }
+                
+                if (saleDate >= startOfMonth) {
+                    monthlyRevenue += sale.total;
+                }
+            }
+
+            DOM.dailySales.textContent = Utils.formatCurrency(dailySales);
+            DOM.monthlyRevenue.textContent = Utils.formatCurrency(monthlyRevenue);
+
+        } catch (error) {
+            console.error("Erro ao calcular vendas:", error);
+        }
+    },
+
+    updateStockCount() {
+        let totalStock = 0;
+        
+        for (const product of Object.values(AppState.products)) {
+            if (product.unidades) {
+                totalStock += Object.values(product.unidades)
+                    .filter(unit => unit.status === 'disponivel').length;
+            }
+        }
+
+        if (DOM.totalStock) {
+            DOM.totalStock.textContent = totalStock;
+        }
+    },
+
+    checkLowStockAlerts() {
+        const alerts = [];
+        
+        for (const [modelId, product] of Object.entries(AppState.products)) {
+            const availableCount = product.unidades ? 
+                Object.values(product.unidades).filter(unit => unit.status === 'disponivel').length : 0;
+            
+            const alertLevel = product.nivelAlertaEstoque || 0;
+            
+            if (alertLevel > 0 && availableCount <= alertLevel) {
+                alerts.push({
+                    nome: product.nome,
+                    disponivel: availableCount,
+                    alerta: alertLevel
+                });
+            }
+        }
+
+        DOM.lowStockAlerts.innerHTML = alerts.length === 0 
+            ? '<li class="text-green-400">Todos os produtos estão com estoque adequado</li>'
+            : alerts.map(alert => 
+                `<li class="text-yellow-400">
+                    <strong>${alert.nome}</strong>: ${alert.disponivel} unidade(s) disponível(eis) 
+                    (alerta: ${alert.alerta})
+                </li>`
+              ).join('');
+    }
+};
+
+// RELATÓRIOS
+const Reports = {
+    generateSalesReport() {
+        const productFilter = DOM.reportsFilterProduct.value.toLowerCase().trim();
+        const identifierFilter = DOM.reportsFilterIdentifier.value.toLowerCase().trim();
+        const startDate = DOM.reportsFilterDateStart.value;
+        const endDate = DOM.reportsFilterDateEnd.value;
+
+        database.ref('vendas').once('value', snapshot => {
+            const sales = snapshot.val() || {};
+            let filteredSales = Object.entries(sales);
+
+            // Aplicar filtros
+            if (startDate) {
+                filteredSales = filteredSales.filter(([id, sale]) => 
+                    new Date(sale.data) >= new Date(startDate + 'T00:00:00Z')
+                );
+            }
+            
+            if (endDate) {
+                filteredSales = filteredSales.filter(([id, sale]) => 
+                    new Date(sale.data) <= new Date(endDate + 'T23:59:59Z')
+                );
+            }
+
+            if (productFilter || identifierFilter) {
+                filteredSales = filteredSales.filter(([id, sale]) => {
+                    for (const item of Object.values(sale.itens)) {
+                        const nameMatch = !productFilter || item.nome.toLowerCase().includes(productFilter);
+                        const identifierMatch = !identifierFilter || item.identifier.toLowerCase().includes(identifierFilter);
+                        if (nameMatch && identifierMatch) return true;
+                    }
+                    return false;
+                });
+            }
+
+            // Gerar relatório
+            const totalSales = filteredSales.length;
+            const totalRevenue = filteredSales.reduce((sum, [id, sale]) => sum + sale.total, 0);
+            const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+            // Produtos mais vendidos
+            const productSales = {};
+            filteredSales.forEach(([id, sale]) => {
+                Object.values(sale.itens).forEach(item => {
+                    if (!productSales[item.nome]) {
+                        productSales[item.nome] = { count: 0, revenue: 0 };
+                    }
+                    productSales[item.nome].count++;
+                    productSales[item.nome].revenue += item.precoVenda;
+                });
+            });
+
+            const topProducts = Object.entries(productSales)
+                .sort((a, b) => b[1].count - a[1].count)
+                .slice(0, 5);
+
+            const reportContent = `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-gray-700 p-4 rounded text-center">
+                            <div class="text-2xl font-bold text-cyan-400">${totalSales}</div>
+                            <div class="text-sm text-gray-400">Total de Vendas</div>
+                        </div>
+                        <div class="bg-gray-700 p-4 rounded text-center">
+                            <div class="text-2xl font-bold text-green-400">${Utils.formatCurrency(totalRevenue)}</div>
+                            <div class="text-sm text-gray-400">Faturamento Total</div>
+                        </div>
+                        <div class="bg-gray-700 p-4 rounded text-center">
+                            <div class="text-2xl font-bold text-yellow-400">${Utils.formatCurrency(averageTicket)}</div>
+                            <div class="text-sm text-gray-400">Ticket Médio</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-lg font-semibold mb-3">Produtos Mais Vendidos</h4>
+                        <div class="space-y-2">
+                            ${topProducts.map(([product, data]) => 
+                                `<div class="flex justify-between items-center p-2 bg-gray-700 rounded">
+                                    <span>${product}</span>
+                                    <div class="text-right">
+                                        <div class="font-semibold">${data.count} vendas</div>
+                                        <div class="text-sm text-gray-400">${Utils.formatCurrency(data.revenue)}</div>
+                                    </div>
+                                </div>`
+                            ).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-lg font-semibold mb-3">Detalhes das Vendas</h4>
+                        <div class="max-h-60 overflow-y-auto space-y-1">
+                            ${filteredSales.map(([id, sale]) => 
+                                `<div class="text-xs p-2 bg-gray-700 rounded">
+                                    <div class="flex justify-between">
+                                        <span>${Utils.formatDate(sale.data)} - ${sale.cliente}</span>
+                                        <span class="font-semibold">${Utils.formatCurrency(sale.total)}</span>
+                                    </div>
+                                </div>`
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            DOM.reportsOutput.innerHTML = reportContent;
+        });
+    },
+
+    generateStockReport() {
+        const productFilter = DOM.reportsFilterProduct.value.toLowerCase().trim();
+        const identifierFilter = DOM.reportsFilterIdentifier.value.toLowerCase().trim();
+
+        let filteredProducts = AppState.products;
+
+        if (productFilter || identifierFilter) {
+            filteredProducts = {};
+            for (const [modelId, product] of Object.entries(AppState.products)) {
+                let matchProduct = !productFilter || product.nome.toLowerCase().includes(productFilter);
+                let matchIdentifier = !identifierFilter;
+                
+                if (identifierFilter && product.unidades) {
+                    for (const identifier of Object.keys(product.unidades)) {
+                        if (identifier.toLowerCase().includes(identifierFilter)) {
+                            matchIdentifier = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (matchProduct && matchIdentifier) {
+                    filteredProducts[modelId] = product;
                 }
             }
         }
 
-        if (productNameMatch && (!identifierFilter || hasMatchingUnit)) {
-            filteredProducts[modelId] = { ...product };
-            if (identifierFilter) {
-                filteredProducts[modelId].unidades = matchingUnits;
+        // Calcular estatísticas
+        let totalProducts = 0;
+        let totalAvailable = 0;
+        let totalSold = 0;
+        let totalValue = 0;
+
+        const productStats = Object.entries(filteredProducts).map(([id, product]) => {
+            const units = product.unidades || {};
+            const available = Object.values(units).filter(u => u.status === 'disponivel').length;
+            const sold = Object.values(units).filter(u => u.status === 'vendido').length;
+            const total = Object.keys(units).length;
+            const value = available * (product.precoVenda || 0);
+
+            totalProducts += total;
+            totalAvailable += available;
+            totalSold += sold;
+            totalValue += value;
+
+            return {
+                nome: product.nome,
+                available,
+                sold,
+                total,
+                value,
+                price: product.precoVenda || 0
+            };
+        });
+
+        const reportContent = `
+            <div class="space-y-6">
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-cyan-400">${totalProducts}</div>
+                        <div class="text-sm text-gray-400">Total de Itens</div>
+                    </div>
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-green-400">${totalAvailable}</div>
+                        <div class="text-sm text-gray-400">Disponível</div>
+                    </div>
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-red-400">${totalSold}</div>
+                        <div class="text-sm text-gray-400">Vendido</div>
+                    </div>
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-yellow-400">${Utils.formatCurrency(totalValue)}</div>
+                        <div class="text-sm text-gray-400">Valor em Estoque</div>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Detalhes por Produto</h4>
+                    <div class="space-y-2">
+                        ${productStats.map(product => 
+                            `<div class="p-3 bg-gray-700 rounded">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <div class="font-semibold">${product.nome}</div>
+                                        <div class="text-sm text-gray-400">Preço: ${Utils.formatCurrency(product.price)}</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-sm">
+                                            <span class="text-green-400">${product.available} disp.</span> |
+                                            <span class="text-red-400">${product.sold} vend.</span> |
+                                            <span class="text-gray-400">${product.total} total</span>
+                                        </div>
+                                        <div class="font-semibold">${Utils.formatCurrency(product.value)}</div>
+                                    </div>
+                                </div>
+                            </div>`
+                        ).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        DOM.reportsOutput.innerHTML = reportContent;
+    },
+
+    generateFinancialReport() {
+        const startDate = DOM.reportsFilterDateStart.value;
+        const endDate = DOM.reportsFilterDateEnd.value;
+
+        Promise.all([
+            database.ref('contasReceber').once('value'),
+            database.ref('contasPagar').once('value'),
+            database.ref('vendas').once('value')
+        ]).then(([receivableSnapshot, payableSnapshot, salesSnapshot]) => {
+            const receivables = receivableSnapshot.val() || {};
+            const payables = payableSnapshot.val() || {};
+            const sales = salesSnapshot.val() || {};
+
+            // Filtrar por data se especificado
+            let filteredReceivables = Object.entries(receivables);
+            let filteredPayables = Object.entries(payables);
+            let filteredSales = Object.entries(sales);
+
+            if (startDate) {
+                const start = new Date(startDate + 'T00:00:00Z');
+                filteredReceivables = filteredReceivables.filter(([id, account]) => 
+                    new Date(account.dataVencimento) >= start
+                );
+                filteredPayables = filteredPayables.filter(([id, account]) => 
+                    new Date(account.dataVencimento) >= start
+                );
+                filteredSales = filteredSales.filter(([id, sale]) => 
+                    new Date(sale.data) >= start
+                );
             }
-        }
-    }
-    renderStockTable(filteredProducts);
-}
 
-
-function openEditProductModelModal(modelId) {
-    const p = products[modelId];
-    if (p) {
-        ui.erp.stock.title.textContent = 'Editar Modelo de Produto';
-        ui.erp.stock.idInput.value = modelId;
-        ui.erp.stock.nameInput.value = p.nome;
-        ui.erp.stock.priceInput.value = p.precoVenda;
-        ui.erp.stock.descriptionInput.value = p.descricao;
-        ui.erp.stock.alertLevelInput.value = p.nivelAlertaEstoque;
-        ui.erp.stock.imageUploadInput.value = '';
-        toggleModal(ui.erp.stock.modal, true);
-    }
-}
-
-function openNewProductModelModal() {
-    ui.erp.stock.title.textContent = 'Adicionar Modelo de Produto';
-    ui.erp.stock.idInput.value = '';
-    ui.erp.stock.nameInput.value = '';
-    ui.erp.stock.priceInput.value = '';
-    ui.erp.stock.descriptionInput.value = '';
-    ui.erp.stock.alertLevelInput.value = '';
-    ui.erp.stock.imageUploadInput.value = '';
-    toggleModal(ui.erp.stock.modal, true);
-}
-
-function addStockUnit(modelId) {
-    const identifier = prompt(`Digite o identificador (Nº de Série) para "${products[modelId].nome}":`);
-    if (identifier) {
-        const cleanIdentifier = identifier.trim();
-        const unitRef = database.ref(`estoque/${modelId}/unidades/${cleanIdentifier}`);
-        unitRef.once('value', snapshot => {
-            if(snapshot.exists()) {
-                alert('Erro: Este identificador já existe para este produto.');
-            } else {
-                unitRef.set({ status: 'disponivel' })
-                    .then(() => alert('Unidade adicionada ao estoque!'))
-                    .catch(e => alert('Erro: ' + e.message));
+            if (endDate) {
+                const end = new Date(endDate + 'T23:59:59Z');
+                filteredReceivables = filteredReceivables.filter(([id, account]) => 
+                    new Date(account.dataVencimento) <= end
+                );
+                filteredPayables = filteredPayables.filter(([id, account]) => 
+                    new Date(account.dataVencimento) <= end
+                );
+                filteredSales = filteredSales.filter(([id, sale]) => 
+                    new Date(sale.data) <= end
+                );
             }
+
+            // Calcular totais
+            const totalReceivable = filteredReceivables.reduce((sum, [id, account]) => sum + account.valor, 0);
+            const totalReceived = filteredReceivables
+                .filter(([id, account]) => account.status === 'Recebido')
+                .reduce((sum, [id, account]) => sum + account.valor, 0);
+            const pendingReceivable = totalReceivable - totalReceived;
+
+            const totalPayable = filteredPayables.reduce((sum, [id, account]) => sum + account.valor, 0);
+            const totalPaid = filteredPayables
+                .filter(([id, account]) => account.status === 'Paga')
+                .reduce((sum, [id, account]) => sum + account.valor, 0);
+            const pendingPayable = totalPayable - totalPaid;
+
+            const totalSalesRevenue = filteredSales.reduce((sum, [id, sale]) => sum + sale.total, 0);
+            const netCashFlow = totalReceived - totalPaid;
+
+            const reportContent = `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-green-800 p-4 rounded">
+                            <h4 class="text-lg font-semibold mb-2 text-green-200">Contas a Receber</h4>
+                            <div class="space-y-1">
+                                <div class="flex justify-between">
+                                    <span>Total a Receber:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(totalReceivable)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Já Recebido:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(totalReceived)}</span>
+                                </div>
+                                <div class="flex justify-between border-t border-green-600 pt-1">
+                                    <span>Pendente:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(pendingReceivable)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-red-800 p-4 rounded">
+                            <h4 class="text-lg font-semibold mb-2 text-red-200">Contas a Pagar</h4>
+                            <div class="space-y-1">
+                                <div class="flex justify-between">
+                                    <span>Total a Pagar:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(totalPayable)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Já Pago:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(totalPaid)}</span>
+                                </div>
+                                <div class="flex justify-between border-t border-red-600 pt-1">
+                                    <span>Pendente:</span>
+                                    <span class="font-bold">${Utils.formatCurrency(pendingPayable)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-cyan-800 p-4 rounded text-center">
+                            <div class="text-2xl font-bold">${Utils.formatCurrency(totalSalesRevenue)}</div>
+                            <div class="text-sm text-gray-300">Faturamento Total</div>
+                        </div>
+                        <div class="bg-${netCashFlow >= 0 ? 'green' : 'red'}-800 p-4 rounded text-center">
+                            <div class="text-2xl font-bold">${Utils.formatCurrency(netCashFlow)}</div>
+                            <div class="text-sm text-gray-300">Fluxo de Caixa Líquido</div>
+                        </div>
+                        <div class="bg-purple-800 p-4 rounded text-center">
+                            <div class="text-2xl font
+
+
+-bold">${Utils.formatCurrency(pendingReceivable - pendingPayable)}</div>
+                            <div class="text-sm text-gray-300">Saldo Projetado</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-lg font-semibold mb-3">Análise de Fluxo de Caixa</h4>
+                        <div class="bg-gray-700 p-4 rounded">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <h5 class="font-semibold text-green-400 mb-2">Entradas</h5>
+                                    <div class="text-sm space-y-1">
+                                        <div class="flex justify-between">
+                                            <span>Vendas Realizadas:</span>
+                                            <span>${Utils.formatCurrency(totalSalesRevenue)}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span>Recebimentos:</span>
+                                            <span>${Utils.formatCurrency(totalReceived)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h5 class="font-semibold text-red-400 mb-2">Saídas</h5>
+                                    <div class="text-sm space-y-1">
+                                        <div class="flex justify-between">
+                                            <span>Pagamentos:</span>
+                                            <span>${Utils.formatCurrency(totalPaid)}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span>Pendências:</span>
+                                            <span>${Utils.formatCurrency(pendingPayable)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            DOM.reportsOutput.innerHTML = reportContent;
         });
     }
-}
+};
 
-function deleteProductModel(modelId) {
-    if (confirm('Tem a certeza de que deseja excluir este modelo de produto e TODAS as suas unidades em estoque? Esta ação é irreversível.')) {
-        database.ref('estoque/' + modelId).remove()
-            .then(() => alert('Modelo de produto excluído com sucesso!'))
-            .catch(error => alert('Erro ao excluir modelo: ' + error.message));
-    }
-}
-
-// --- MÓDULO: COMPRAS E FORNECEDORES ---
-function saveSupplier() {
-    const id = ui.erp.suppliers.idInput.value;
-    const name = ui.erp.suppliers.nameInput.value.trim();
-    const contact = ui.erp.suppliers.contactInput.value.trim();
-    if (!name) {
-        alert("O nome do fornecedor é obrigatório.");
-        return;
-    }
-    const supplierData = { nome: name, contato: contact };
-    const ref = id ? database.ref('fornecedores/' + id) : database.ref('fornecedores').push();
-    ref.set(supplierData).then(() => {
-        alert(`Fornecedor ${id ? 'atualizado' : 'salvo'} com sucesso!`);
-        toggleModal(ui.erp.suppliers.modal, false);
-    }).catch(e => alert("Erro: " + e.message));
-}
-
-function loadSupplierManagement() {
-    database.ref('fornecedores').on('value', snapshot => {
-        suppliers = snapshot.val() || {};
-        const tableBody = Object.entries(suppliers).map(([id, s]) => `
-            <tr>
-                <td>${s.nome}</td>
-                <td>${s.contato}</td>
-                <td>
-                    <button class="edit-supplier-button bg-blue-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Editar</button>
-                    <button class="delete-supplier-button bg-red-600 text-white text-xs px-2 py-1 rounded ml-2" data-id="${id}">Excluir</button>
-                </td>
-            </tr>
-        `).join('');
-        ui.erp.suppliers.list.innerHTML = `
-            <table class="w-full text-sm">
-                <thead><tr><th>Nome</th><th>Contato</th><th>Ações</th></tr></thead>
-                <tbody>${tableBody || '<tr><td colspan="3" class="text-center">Nenhum fornecedor registado.</td></tr>'}</tbody>
-            </table>`;
-    });
-}
-
-function openEditSupplierModal(id) {
-    const s = suppliers[id];
-    if (s) {
-        ui.erp.suppliers.title.textContent = "Editar Fornecedor";
-        ui.erp.suppliers.idInput.value = id;
-        ui.erp.suppliers.nameInput.value = s.nome;
-        ui.erp.suppliers.contactInput.value = s.contato;
-        toggleModal(ui.erp.suppliers.modal, true);
-    }
-}
-
-function openNewSupplierModal() {
-    ui.erp.suppliers.title.textContent = "Adicionar Fornecedor";
-    ui.erp.suppliers.idInput.value = '';
-    ui.erp.suppliers.nameInput.value = '';
-    ui.erp.suppliers.contactInput.value = '';
-    toggleModal(ui.erp.suppliers.modal, true);
-}
-
-function deleteSupplier(id) {
-    if (confirm("Tem a certeza de que deseja excluir este fornecedor?")) {
-        database.ref('fornecedores/' + id).remove()
-        .then(() => alert("Fornecedor excluído."))
-        .catch(e => alert("Erro: " + e.message));
-    }
-}
-
-function openNewPurchaseModal() {
-    const supplierOptions = Object.entries(suppliers).map(([id, s]) => `<option value="${id}">${s.nome}</option>`).join('');
-    const productOptions = Object.entries(products).map(([id, p]) => `<option value="${id}">${p.nome}</option>`).join('');
-    if(!supplierOptions || !productOptions) {
-        alert("É necessário ter pelo menos um fornecedor e um modelo de produto registado.");
-        return;
-    }
-    ui.erp.purchases.supplierSelect.innerHTML = supplierOptions;
-    ui.erp.purchases.productSelect.innerHTML = productOptions;
-    
-    ui.erp.purchases.invoiceInput.value = '';
-    ui.erp.purchases.paymentMethodSelect.value = 'Boleto';
-    ui.erp.purchases.dateInput.value = new Date().toISOString().split('T')[0];
-    ui.erp.purchases.priceInput.value = '';
-    ui.erp.purchases.identifiersTextarea.value = '';
-    
-    currentPurchaseItems = [];
-    updatePurchaseItemsList();
-    toggleModal(ui.erp.purchases.modal, true);
-}
-
-function addItemToPurchase() {
-    const productId = ui.erp.purchases.productSelect.value;
-    const unitPrice = parseFloat(ui.erp.purchases.priceInput.value);
-    const identifiers = ui.erp.purchases.identifiersTextarea.value.trim().split('\n').filter(Boolean);
-
-    if (!productId || isNaN(unitPrice) || unitPrice < 0 || identifiers.length === 0) {
-        alert("Dados do item inválidos. Selecione produto, custo e insira ao menos um identificador.");
-        return;
-    }
-    
-    currentPurchaseItems.push({
-        modelId: productId,
-        nome: products[productId].nome,
-        unitPrice: unitPrice,
-        identifiers: identifiers
-    });
-
-    updatePurchaseItemsList();
-    // Limpar campos para o próximo item
-    ui.erp.purchases.priceInput.value = '';
-    ui.erp.purchases.identifiersTextarea.value = '';
-}
-
-function updatePurchaseItemsList() {
-    let total = 0;
-    ui.erp.purchases.itemsList.innerHTML = currentPurchaseItems.map((item, index) => {
-        const subtotal = item.identifiers.length * item.unitPrice;
-        total += subtotal;
-        return `<div class="flex justify-between items-center p-2 bg-gray-700 rounded mb-1">
-                    <div>
-                        <p>${item.identifiers.length}x ${item.nome} @ R$ ${item.unitPrice.toFixed(2)}</p>
-                        <p class="text-xs text-gray-400">S/N: ${item.identifiers.join(', ')}</p>
-                    </div>
-                    <button class="text-red-400 hover:text-red-600 remove-purchase-item-button" data-index="${index}">&times;</button>
-                </div>`;
-    }).join('');
-    ui.erp.purchases.total.textContent = `R$ ${total.toFixed(2)}`;
-}
-
-function removeItemFromPurchase(itemIndex) {
-    currentPurchaseItems.splice(itemIndex, 1);
-    updatePurchaseItemsList();
-}
-
-function savePurchase() {
-    const supplierId = ui.erp.purchases.supplierSelect.value;
-    const invoiceNumber = ui.erp.purchases.invoiceInput.value.trim();
-    const purchaseDate = ui.erp.purchases.dateInput.value;
-    const paymentMethod = ui.erp.purchases.paymentMethodSelect.value;
-
-    if (!supplierId || !invoiceNumber || !purchaseDate || currentPurchaseItems.length === 0) {
-        alert("Preencha todos os campos da compra e adicione itens.");
-        return;
-    }
-
-    const total = currentPurchaseItems.reduce((sum, item) => sum + (item.identifiers.length * item.unitPrice), 0);
-    const purchaseData = {
-        fornecedorId: supplierId,
-        fornecedorNome: suppliers[supplierId].nome,
-        itens: currentPurchaseItems,
-        total: total,
-        status: 'Aguardando Recebimento',
-        dataRegistro: new Date().toISOString(),
-        numeroNota: invoiceNumber,
-        dataCompra: purchaseDate,
-        formaPagamento: paymentMethod
-    };
-    
-    database.ref('compras').push(purchaseData).then(() => {
-        alert("Compra registada com sucesso!");
-        toggleModal(ui.erp.purchases.modal, false);
-    }).catch(e => alert("Erro: " + e.message));
-}
-
-function loadPurchases() {
-    database.ref('compras').on('value', snapshot => {
-        const purchases = snapshot.val() || {};
-        const tableBody = Object.entries(purchases).map(([id, p]) => `
-            <tr class="align-middle">
-                <td>${new Date(p.dataCompra).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
-                <td>${p.numeroNota}</td>
-                <td>${p.fornecedorNome}</td>
-                <td>R$ ${p.total.toFixed(2).replace('.',',')}</td>
-                <td>${p.formaPagamento}</td>
-                <td><span class="px-2 py-1 text-xs rounded-full ${p.status === 'Recebido' ? 'bg-green-700' : 'bg-yellow-700'}">${p.status}</span></td>
-                <td>
-                    ${p.status === 'Aguardando Recebimento' ? `<button class="confirm-receipt-button bg-green-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Receber</button>` : ''}
-                    <button class="delete-purchase-button bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded ml-2" data-id="${id}">Excluir</button>
-                </td>
-            </tr>`).join('');
-        ui.erp.purchases.list.innerHTML = `
-            <table class="w-full text-sm">
-                <thead><tr><th>Data</th><th>Nº Nota</th><th>Fornecedor</th><th>Total</th><th>Pagamento</th><th>Status</th><th>Ações</th></tr></thead>
-                <tbody>${tableBody || '<tr><td colspan="7" class="text-center">Nenhuma compra registada.</td></tr>'}</tbody>
-            </table>`;
-    });
-}
-
-function deletePurchase(purchaseId) {
-    const purchaseRef = database.ref('compras/' + purchaseId);
-    purchaseRef.once('value', snapshot => {
-        const purchase = snapshot.val();
-        if (!purchase) return;
-
-        if (purchase.status === 'Recebido') {
-            alert('Não é possível excluir uma compra que já foi recebida e teve o estoque atualizado.');
+// SISTEMA DE RESET
+const SystemReset = {
+    async resetSystem() {
+        if (!confirm('ATENÇÃO: Esta ação irá apagar TODOS os dados do sistema (produtos, vendas, clientes, etc.). Esta ação é IRREVERSÍVEL. Tem certeza?')) {
             return;
         }
 
-        if (confirm(`Tem a certeza de que deseja excluir a compra da NF #${purchase.numeroNota}? Esta ação não pode ser desfeita.`)) {
-            purchaseRef.remove()
-                .then(() => alert('Nota de compra excluída com sucesso!'))
-                .catch(error => alert('Erro ao excluir nota: ' + error.message));
+        if (!confirm('ÚLTIMA CONFIRMAÇÃO: Todos os dados serão perdidos permanentemente. Continuar?')) {
+            return;
         }
-    });
-}
 
-async function confirmPurchaseReceipt(purchaseId) {
-    const purchaseRef = database.ref('compras/' + purchaseId);
-    const purchaseSnapshot = await purchaseRef.once('value');
-    const purchase = purchaseSnapshot.val();
-    if (purchase && confirm('Confirmar o recebimento desta compra? O estoque será atualizado e uma conta a pagar será gerada.')) {
-        const updates = {};
-        for (const item of purchase.itens) {
-            for (const identifier of item.identifiers) {
-                updates[`/estoque/${item.modelId}/unidades/${identifier}`] = { status: 'disponivel' };
-            }
-        }
-        await database.ref().update(updates);
-
-        await database.ref('contasPagar').push({
-            compraId: purchaseId,
-            fornecedorId: purchase.fornecedorId,
-            fornecedorNome: purchase.fornecedorNome,
-            descricao: `Pagamento NF #${purchase.numeroNota}`,
-            valor: purchase.total,
-            dataVencimento: purchase.dataCompra,
-            status: 'Pendente'
-        });
-        
-        await purchaseRef.update({ status: 'Recebido' });
-        alert('Recebimento confirmado, estoque atualizado e conta a pagar gerada!');
-    }
-}
-
-// --- MÓDULO FINANCEIRO ---
-function openNewExpenseModal() {
-    ui.expenseModal.descriptionInput.value = '';
-    ui.expenseModal.valueInput.value = '';
-    ui.expenseModal.dueDateInput.value = new Date().toISOString().split('T')[0];
-    ui.expenseModal.categorySelect.value = 'Custo Fixo';
-    toggleModal(ui.expenseModal.modal, true);
-}
-
-function saveExpense() {
-    const description = ui.expenseModal.descriptionInput.value.trim();
-    const value = parseFloat(ui.expenseModal.valueInput.value);
-    const dueDate = ui.expenseModal.dueDateInput.value;
-    const category = ui.expenseModal.categorySelect.value;
-
-    if (!description || isNaN(value) || value <= 0 || !dueDate) {
-        alert("Preencha todos os campos da despesa corretamente.");
-        return;
-    }
-
-    const expenseData = {
-        descricao: description,
-        categoria: category,
-        valor: value,
-        dataVencimento: dueDate,
-        status: 'Pendente'
-    };
-
-    database.ref('contasPagar').push(expenseData).then(() => {
-        alert("Despesa lançada com sucesso!");
-        toggleModal(ui.expenseModal.modal, false);
-    }).catch(error => {
-        alert("Erro ao salvar despesa: " + error.message);
-    });
-}
-
-function loadFinance() {
-    database.ref('contasReceber').orderByChild('dataVencimento').on('value', (snapshot) => {
-        const accounts = snapshot.val() || {};
-        const tableBody = Object.entries(accounts).map(([id, acc]) => {
-            const isPaid = acc.status === 'Recebido';
-            return `
-            <tr>
-                <td>${new Date(acc.dataVencimento + 'T12:00:00Z').toLocaleDateString()}</td>
-                <td>${acc.clienteNome || 'N/A'}</td>
-                <td>${acc.descricao}</td>
-                <td class="text-green-400">+ R$ ${acc.valor.toFixed(2).replace('.',',')}</td>
-                <td><span class="px-2 py-1 text-xs rounded-full ${isPaid ? 'bg-green-700' : 'bg-yellow-700'}">${acc.status}</span></td>
-                <td>${!isPaid ? `<button class="confirm-transaction-button bg-green-600 text-white text-xs px-2 py-1 rounded" data-id="${id}" data-type="receber">Receber</button>` : `Liquidado em ${new Date(acc.dataRecebimento).toLocaleDateString()}`}</td>
-            </tr>`;
-        }).join('');
-        ui.erp.finance.accountsReceivable.innerHTML = `
-            <table class="w-full text-sm"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Descrição</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
-            <tbody>${tableBody || '<tr><td colspan="6" class="text-center">Nenhuma conta a receber.</td></tr>'}</tbody></table>`;
-    });
-
-    database.ref('contasPagar').orderByChild('dataVencimento').on('value', (snapshot) => {
-        const accounts = snapshot.val() || {};
-        const tableBody = Object.entries(accounts).map(([id, acc]) => {
-            const isPaid = acc.status === 'Paga';
-            return `
-            <tr>
-                <td>${new Date(acc.dataVencimento + 'T12:00:00Z').toLocaleDateString()}</td>
-                <td>${acc.fornecedorNome || acc.categoria}</td>
-                <td>${acc.descricao}</td>
-                <td class="text-red-400">- R$ ${acc.valor.toFixed(2).replace('.',',')}</td>
-                <td><span class="px-2 py-1 text-xs rounded-full ${isPaid ? 'bg-green-700' : 'bg-yellow-700'}">${acc.status}</span></td>
-                <td>${!isPaid ? `<button class="confirm-transaction-button bg-blue-600 text-white text-xs px-2 py-1 rounded" data-id="${id}" data-type="pagar">Pagar</button>` : `Liquidado em ${new Date(acc.dataPagamento).toLocaleDateString()}`}</td>
-            </tr>`;
-        }).join('');
-        ui.erp.finance.accountsPayable.innerHTML = `
-            <table class="w-full text-sm"><thead><tr><th>Vencimento</th><th>Fornecedor/Categoria</th><th>Descrição</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
-            <tbody>${tableBody || '<tr><td colspan="6" class="text-center">Nenhuma conta a pagar.</td></tr>'}</tbody></table>`;
-    });
-
-    database.ref('fluxoDeCaixa').on('value', (snapshot) => {
-        const transactions = snapshot.val() || {};
-        const balance = Object.values(transactions).reduce((acc, t) => acc + t.valor, 0);
-        ui.erp.finance.cashBalance.textContent = `R$ ${balance.toFixed(2).replace('.',',')}`;
-        ui.erp.finance.cashBalance.classList.toggle('text-red-400', balance < 0);
-        ui.erp.finance.cashBalance.classList.toggle('text-green-400', balance >= 0);
-    });
-}
-
-async function confirmTransaction(accountId, type) {
-    const isReceiving = type === 'receber';
-    const node = isReceiving ? 'contasReceber' : 'contasPagar';
-    const newStatus = isReceiving ? 'Recebido' : 'Paga';
-    const dateField = isReceiving ? 'dataRecebimento' : 'dataPagamento';
-    const confirmationText = isReceiving ? 'Recebimento' : 'Pagamento';
-    
-    const accountRef = database.ref(`${node}/${accountId}`);
-    const snapshot = await accountRef.once('value');
-    const account = snapshot.val();
-
-    if (!account || account.status !== 'Pendente') return;
-    
-    if (confirm(`Confirmar ${confirmationText} de R$ ${account.valor.toFixed(2)}?`)) {
         try {
-            await accountRef.update({
-                status: newStatus,
-                [dateField]: new Date().toISOString()
-            });
+            const updates = {
+                '/produtos': null,
+                '/vendas': null,
+                '/pedidos': null,
+                '/clientes': null,
+                '/fornecedores': null,
+                '/compras': null,
+                '/contasReceber': null,
+                '/contasPagar': null
+            };
 
-            await database.ref('fluxoDeCaixa').push({
-                descricao: `${confirmationText}: ${account.descricao}`,
-                valor: isReceiving ? account.valor : -account.valor,
-                data: new Date().toISOString()
-            });
+            await database.ref().update(updates);
+            Utils.showNotification('Sistema resetado com sucesso!', 'success');
+            
+            // Recarregar a página
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
 
-            alert(`${confirmationText} confirmado e lançado no caixa!`);
         } catch (error) {
-            alert(`Erro ao confirmar ${confirmationText}: ` + error.message);
+            console.error("Erro ao resetar sistema:", error);
+            Utils.showNotification('Erro ao resetar sistema: ' + error.message, 'error');
         }
     }
-}
+};
 
-// --- OUTRAS FUNÇÕES ---
-function updateLowStockAlerts() {
-    if (!ui.erp.dashboard.lowStockAlerts) return;
-    const lowStockProducts = Object.values(products).filter(p => {
-        const availableCount = p.unidades ? Object.values(p.unidades).filter(u => u.status === 'disponivel').length : 0;
-        return availableCount <= (p.nivelAlertaEstoque || 0);
-    });
-    if (lowStockProducts.length === 0) {
-        ui.erp.dashboard.lowStockAlerts.innerHTML = '<li>Nenhum alerta de estoque baixo.</li>';
-    } else {
-        ui.erp.dashboard.lowStockAlerts.innerHTML = lowStockProducts.map(p => {
-            const availableCount = p.unidades ? Object.values(p.unidades).filter(u => u.status === 'disponivel').length : 0;
-            return `<li class="text-red-400">${p.nome}: ${availableCount} em estoque (Alerta: ${p.nivelAlertaEstoque})</li>`;
-        }).join('');
-    }
-}
+// EVENT LISTENERS
+const EventListeners = {
+    init() {
+        // Navegação
+        DOM.authButton.addEventListener('click', Auth.handleAuthClick);
+        DOM.navHome.addEventListener('click', () => UI.switchView('public'));
+        DOM.navShop.addEventListener('click', () => UI.switchView('public'));
+        DOM.navCart.addEventListener('click', () => UI.toggleModal(DOM.cartModal, true));
 
-function calculateDailySalesAndMonthlyRevenue() {
-    database.ref('vendas').on('value', (snapshot) => {
-        const sales = snapshot.val() || {};
-        const today = new Date();
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
-        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-        let daily = 0, monthly = 0;
-        Object.values(sales).forEach(sale => {
-            const saleDate = new Date(sale.data).getTime();
-            if (saleDate >= startOfMonth) monthly += sale.total;
-            if (saleDate >= startOfDay) daily += sale.total;
+        // Tabs
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const tabId = button.getAttribute('data-tab');
+                UI.switchTab(tabId);
+            });
         });
-        ui.erp.dashboard.dailySales.textContent = `R$ ${daily.toFixed(2).replace('.',',')}`;
-        ui.erp.dashboard.monthlyRevenue.textContent = `R$ ${monthly.toFixed(2).replace('.',',')}`;
-    });
-}
 
-function initiateSystemReset() {
-    const password = prompt("Esta é uma ação IRREVERSÍVEL e apagará TODOS os dados (produtos, vendas, clientes, etc). \n\nDigite a senha '9999' para continuar.");
-    if (password === '9999') {
-        if (confirm("TEM CERTEZA ABSOLUTA? Todos os dados serão permanentemente excluídos. Esta ação não pode ser desfeita.")) {
-            performSystemReset();
-        }
-    } else if (password !== null) {
-        alert("Senha incorreta.");
+        // Carrinho
+        DOM.closeCartModal.addEventListener('click', () => UI.toggleModal(DOM.cartModal, false));
+        DOM.checkoutButton.addEventListener('click', () => {
+            UI.toggleModal(DOM.cartModal, false);
+            UI.toggleModal(DOM.checkoutModal, true);
+        });
+
+        // Checkout
+        DOM.closeCheckoutModal.addEventListener('click', () => UI.toggleModal(DOM.checkoutModal, false));
+        DOM.submitCheckout.addEventListener('click', Cart.submitCheckout);
+
+        // Modais - Botões de fechar
+        DOM.closePaymentConfirmationModal.addEventListener('click', () => UI.toggleModal(DOM.paymentConfirmationModal, false));
+        DOM.closeManualSaleModal.addEventListener('click', () => UI.toggleModal(DOM.manualSaleModal, false));
+        DOM.closeCustomerFormModal.addEventListener('click', () => UI.toggleModal(DOM.customerFormModal, false));
+        DOM.closeProductModelFormModal.addEventListener('click', () => UI.toggleModal(DOM.productModelFormModal, false));
+        DOM.closeSupplierFormModal.addEventListener('click', () => UI.toggleModal(DOM.supplierFormModal, false));
+        DOM.closePurchaseFormModal.addEventListener('click', () => UI.toggleModal(DOM.purchaseFormModal, false));
+        DOM.closeExpenseFormModal.addEventListener('click', () => UI.toggleModal(DOM.expenseFormModal, false));
+        DOM.closeDetailsModal.addEventListener('click', () => UI.toggleModal(DOM.detailsModal, false));
+
+        // Dashboard
+        DOM.resetSystemButton.addEventListener('click', SystemReset.resetSystem);
+
+        // Vendas
+        DOM.newSaleButton.addEventListener('click', Sales.openNewSaleModal);
+        DOM.applySalesHistoryFilter.addEventListener('click', Sales.applySalesHistoryFilter);
+
+        // Estoque
+        DOM.addProductModelButton.addEventListener('click', Stock.openNewProductModelModal);
+        DOM.stockFilterProduct.addEventListener('input', Stock.applyFilters);
+        DOM.stockFilterIdentifier.addEventListener('input', Stock.applyFilters);
+
+        // Compras
+        DOM.newPurchaseButton.addEventListener('click', Purchases.openNewPurchaseModal);
+
+        // Clientes
+        DOM.addCustomerButton.addEventListener('click', Customers.openNewCustomerModal);
+
+        // Fornecedores
+        DOM.addSupplierButton.addEventListener('click', Suppliers.openNewSupplierModal);
+
+        // Financeiro
+        DOM.newExpenseButton.addEventListener('click', Finance.openNewExpenseModal);
+
+        // Relatórios
+        DOM.generateSalesReport.addEventListener('click', Reports.generateSalesReport);
+        DOM.generateStockReport.addEventListener('click', Reports.generateStockReport);
+        DOM.generateFinancialReport.addEventListener('click', Reports.generateFinancialReport);
+
+        // Formulários - Botões de salvar
+        document.getElementById('save-customer-button').addEventListener('click', Customers.saveCustomer);
+        document.getElementById('save-product-model-button').addEventListener('click', Stock.saveProductModel);
+        document.getElementById('save-supplier-button').addEventListener('click', Suppliers.saveSupplier);
+        document.getElementById('save-purchase-button').addEventListener('click', Purchases.savePurchase);
+        document.getElementById('save-expense-button').addEventListener('click', Finance.saveExpense);
+        document.getElementById('save-manual-sale-button').addEventListener('click', Sales.saveManualSale);
+
+        // Vendas - Modal de confirmação
+        document.getElementById('confirm-sale-payment-method').addEventListener('change', Sales.toggleInstallmentFields);
+        document.getElementById('process-sale-confirmation-button').addEventListener('click', Sales.processSaleConfirmation);
+
+        // Vendas - Modal manual
+        document.getElementById('sale-product-model').addEventListener('change', Sales.populateSaleIdentifiers);
+        document.getElementById('add-item-to-sale-button').addEventListener('click', Sales.addItemToSale);
+
+        // Compras - Modal
+        document.getElementById('purchase-payment-method').addEventListener('change', Purchases.togglePaymentDetails);
+        document.getElementById('add-item-to-purchase-button').addEventListener('click', Purchases.addItemToPurchase);
+
+        // Event delegation para botões dinâmicos
+        document.addEventListener('click', (e) => {
+            // Carrinho
+            if (e.target.classList.contains('add-to-cart-button')) {
+                const productId = e.target.getAttribute('data-id');
+                Cart.addToCart(productId);
+            }
+
+            if (e.target.classList.contains('remove-from-cart-button')) {
+                const productId = e.target.getAttribute('data-id');
+                Cart.removeFromCart(productId);
+            }
+
+            // Vendas
+            if (e.target.classList.contains('confirm-sale-button')) {
+                const orderId = e.target.getAttribute('data-id');
+                Sales.openPaymentConfirmationModal(orderId);
+            }
+
+            if (e.target.classList.contains('cancel-order-button')) {
+                const orderId = e.target.getAttribute('data-id');
+                Sales.cancelOrder(orderId);
+            }
+
+            if (e.target.classList.contains('remove-sale-item-button')) {
+                const index = parseInt(e.target.getAttribute('data-index'));
+                Sales.removeItemFromSale(index);
+            }
+
+            // Estoque
+            if (e.target.classList.contains('edit-product-model-button')) {
+                const modelId = e.target.getAttribute('data-id');
+                Stock.openEditProductModelModal(modelId);
+            }
+
+            if (e.target.classList.contains('delete-product-model-button')) {
+                const modelId = e.target.getAttribute('data-id');
+                Stock.deleteProductModel(modelId);
+            }
+
+            // Compras
+            if (e.target.classList.contains('confirm-receipt-button')) {
+                const purchaseId = e.target.getAttribute('data-id');
+                Purchases.confirmPurchaseReceipt(purchaseId);
+            }
+
+            if (e.target.classList.contains('delete-purchase-button')) {
+                const purchaseId = e.target.getAttribute('data-id');
+                Purchases.deletePurchase(purchaseId);
+            }
+
+            if (e.target.classList.contains('remove-purchase-item-button')) {
+                const index = parseInt(e.target.getAttribute('data-index'));
+                Purchases.removeItemFromPurchase(index);
+            }
+
+            // Clientes
+            if (e.target.classList.contains('edit-customer-button')) {
+                const customerId = e.target.getAttribute('data-id');
+                Customers.openEditCustomerModal(customerId);
+            }
+
+            if (e.target.classList.contains('delete-customer-button')) {
+                const customerId = e.target.getAttribute('data-id');
+                Customers.deleteCustomer(customerId);
+            }
+
+            // Fornecedores
+            if (e.target.classList.contains('edit-supplier-button')) {
+                const supplierId = e.target.getAttribute('data-id');
+                Suppliers.openEditSupplierModal(supplierId);
+            }
+
+            if (e.target.classList.contains('delete-supplier-button')) {
+                const supplierId = e.target.getAttribute('data-id');
+                Suppliers.deleteSupplier(supplierId);
+            }
+
+            // Financeiro
+            if (e.target.classList.contains('confirm-transaction-button')) {
+                const accountId = e.target.getAttribute('data-id');
+                const type = e.target.getAttribute('data-type');
+                Finance.confirmTransaction(accountId, type);
+            }
+
+            // Linhas clicáveis para detalhes
+            if (e.target.closest('.clickable-row')) {
+                const row = e.target.closest('.clickable-row');
+                const type = row.getAttribute('data-type');
+                const id = row.getAttribute('data-id');
+
+                // Não abrir detalhes se clicou em um botão
+                if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                    return;
+                }
+
+                switch (type) {
+                    case 'product':
+                        Stock.showProductDetails(id);
+                        break;
+                    case 'sale':
+                        Sales.showSaleDetails(id);
+                        break;
+                    case 'order':
+                        Sales.showOrderDetails(id);
+                        break;
+                    case 'purchase':
+                        Purchases.showPurchaseDetails(id);
+                        break;
+                    case 'customer':
+                        Customers.showCustomerDetails(id);
+                        break;
+                    case 'supplier':
+                        Suppliers.showSupplierDetails(id);
+                        break;
+                    case 'receivable':
+                        Finance.showAccountDetails(id, 'receivable');
+                        break;
+                    case 'payable':
+                        Finance.showAccountDetails(id, 'payable');
+                        break;
+                }
+            }
+
+            // Atualizar total na confirmação de venda
+            if (e.target.classList.contains('confirm-item-price')) {
+                Sales.updateConfirmationTotal();
+            }
+        });
+
+        // Fechar modais clicando no backdrop
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-backdrop')) {
+                e.target.classList.add('hidden');
+            }
+        });
+
+        // Tecla ESC para fechar modais
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-backdrop:not(.hidden)').forEach(modal => {
+                    modal.classList.add('hidden');
+                });
+            }
+        });
     }
-}
+};
 
-async function performSystemReset() {
-    const resetData = {
-        '/estoque': null,
-        '/vendas': null,
-        '/pedidos': null,
-        '/clientes': null,
-        '/fornecedores': null,
-        '/compras': null,
-        '/fluxoDeCaixa': null,
-        '/contasReceber': null,
-        '/contasPagar': null,
-    };
-
-    try {
-        await database.ref().update(resetData);
-        alert("Sistema reiniciado com sucesso. A página será recarregada.");
-        location.reload();
-    } catch (error) {
-        alert("Ocorreu um erro ao tentar reiniciar o sistema: " + error.message);
-    }
-}
-
-
-// --- INICIALIZAÇÃO E EVENT LISTENERS ---
-function attachEventListeners() {
-    // Navegação e Autenticação
-    ui.authButton.addEventListener('click', handleAuthClick);
-    ui.nav.home.addEventListener('click', (e) => { e.preventDefault(); switchView('public'); });
-    ui.nav.shop.addEventListener('click', (e) => { e.preventDefault(); switchView('public'); });
-    ui.nav.dashboard.addEventListener('click', (e) => { e.preventDefault(); switchView('management'); });
-    ui.erp.tabs.forEach(button => button.addEventListener('click', () => switchTab(button.dataset.tab)));
-    ui.erp.dashboard.resetSystemButton.addEventListener('click', initiateSystemReset);
-
-    // Delegação de Eventos para botões e inputs dinâmicos
-    document.body.addEventListener('click', e => {
-        const target = e.target.closest('button');
-        if (!target) return;
-
-        const datasetId = target.dataset.id;
-        
-        if (target.classList.contains('add-to-cart-button')) addToCart(datasetId);
-        else if (target.classList.contains('remove-from-cart-button')) removeFromCart(datasetId);
-        else if (target.classList.contains('edit-product-model-button')) openEditProductModelModal(datasetId);
-        else if (target.classList.contains('delete-product-model-button')) deleteProductModel(datasetId);
-        else if (target.classList.contains('add-stock-unit-button')) addStockUnit(datasetId);
-        else if (target.classList.contains('edit-supplier-button')) openEditSupplierModal(datasetId);
-        else if (target.classList.contains('delete-supplier-button')) deleteSupplier(datasetId);
-        else if (target.classList.contains('edit-customer-button')) openEditCustomerModal(datasetId);
-        else if (target.classList.contains('delete-customer-button')) deleteCustomer(datasetId);
-        else if (target.classList.contains('confirm-receipt-button')) confirmPurchaseReceipt(datasetId);
-        else if (target.classList.contains('delete-purchase-button')) deletePurchase(datasetId);
-        else if (target.classList.contains('confirm-sale-button')) openPaymentConfirmationModal(datasetId);
-        else if (target.classList.contains('cancel-order-button')) cancelOrder(datasetId);
-        else if (target.classList.contains('confirm-transaction-button')) confirmTransaction(datasetId, target.dataset.type);
-        else if (target.classList.contains('remove-purchase-item-button')) removeItemFromPurchase(target.dataset.index);
-        else if (target.classList.contains('remove-sale-item-button')) removeItemFromSale(target.dataset.index);
-    });
-
-    // Listener de input para modal de confirmação de venda
-    ui.paymentConfirmationModal.modal.addEventListener('input', e => {
-        if (e.target.classList.contains('confirm-item-price')) {
-            updateConfirmationTotal();
-        }
-    });
-
-    // Modais
-    ui.nav.cart.addEventListener('click', (e) => { e.preventDefault(); toggleModal(ui.cart.modal, true); });
-    ui.cart.closeButton.addEventListener('click', () => toggleModal(ui.cart.modal, false));
-    ui.cart.checkoutButton.addEventListener('click', () => {
-        toggleModal(ui.cart.modal, false);
-        toggleModal(ui.checkout.modal, true);
-    });
-    ui.checkout.closeButton.addEventListener('click', () => toggleModal(ui.checkout.modal, false));
-    ui.checkout.submitButton.addEventListener('click', submitCheckout);
-    ui.paymentConfirmationModal.closeButton.addEventListener('click', () => toggleModal(ui.paymentConfirmationModal.modal, false));
-    ui.paymentConfirmationModal.processButton.addEventListener('click', processSaleConfirmation);
-    ui.paymentConfirmationModal.paymentMethodSelect.addEventListener('change', toggleInstallmentFields);
-
-    // Modais do ERP
-    ui.erp.stock.addModelButton.addEventListener('click', openNewProductModelModal);
-    ui.erp.stock.closeModalButton.addEventListener('click', () => toggleModal(ui.erp.stock.modal, false));
-    ui.erp.stock.saveButton.addEventListener('click', saveProductModel);
-
-    ui.erp.suppliers.addButton.addEventListener('click', openNewSupplierModal);
-    ui.erp.suppliers.closeModalButton.addEventListener('click', () => toggleModal(ui.erp.suppliers.modal, false));
-    ui.erp.suppliers.saveButton.addEventListener('click', saveSupplier);
-
-    ui.erp.customers.addButton.addEventListener('click', openNewCustomerModal);
-    ui.erp.customers.closeModalButton.addEventListener('click', () => toggleModal(ui.erp.customers.modal, false));
-    ui.erp.customers.saveButton.addEventListener('click', saveCustomer);
-    
-    ui.erp.purchases.newButton.addEventListener('click', openNewPurchaseModal);
-    ui.erp.purchases.closeModalButton.addEventListener('click', () => toggleModal(ui.erp.purchases.modal, false));
-    ui.erp.purchases.addItemButton.addEventListener('click', addItemToPurchase);
-    ui.erp.purchases.saveButton.addEventListener('click', savePurchase);
-    
-    ui.erp.sales.newSaleButton.addEventListener('click', openNewSaleModal);
-    ui.erp.sales.closeManualSaleModal.addEventListener('click', () => toggleModal(ui.erp.sales.manualSaleModal, false));
-    ui.erp.sales.addItemButton.addEventListener('click', addItemToSale);
-    ui.erp.sales.saveManualSaleButton.addEventListener('click', saveManualSale);
-    ui.erp.sales.productModelSelect.addEventListener('change', populateSaleIdentifiers);
-    
-    ui.erp.finance.newExpenseButton.addEventListener('click', openNewExpenseModal);
-    ui.expenseModal.closeButton.addEventListener('click', () => toggleModal(ui.expenseModal.modal, false));
-    ui.expenseModal.saveButton.addEventListener('click', saveExpense);
-
-    // Listeners dos filtros
-    ui.erp.stock.filterProduct.addEventListener('input', applyStockFilter);
-    ui.erp.stock.filterIdentifier.addEventListener('input', applyStockFilter);
-    ui.erp.sales.applyHistoryFilterButton.addEventListener('click', applySalesHistoryFilter);
-}
-
+// INICIALIZAÇÃO DA APLICAÇÃO
 document.addEventListener('DOMContentLoaded', () => {
-    querySelAll('.modal-backdrop').forEach(modal => modal.classList.add('hidden'));
-    loadPublicProducts();
-    attachEventListeners();
-    updateCartDisplay();
+    Auth.init();
+    EventListeners.init();
+    Shop.loadPublicProducts();
+    
+    // Inicializar filtros em tempo real
+    DOM.stockFilterProduct.addEventListener('input', Stock.applyFilters);
+    DOM.stockFilterIdentifier.addEventListener('input', Stock.applyFilters);
+    
+    console.log('Techmess ERP v3.0 - Sistema Profissional de Gestão inicializado com sucesso!');
+});
+
+// Exportar para uso global (se necessário)
+window.TechmessERP = {
+    Auth,
+    Shop,
+    Cart,
+    Stock,
+    Sales,
+    Purchases,
+    Customers,
+    Suppliers,
+    Finance,
+    Dashboard,
+    Reports,
+    Utils,
+    UI
+};
+
+
+
+// Event listeners para mostrar/ocultar campos de parcelas
+document.addEventListener('DOMContentLoaded', () => {
+    // Modal de confirmação de venda
+    const confirmSalePaymentMethod = document.getElementById('confirm-sale-payment-method');
+    if (confirmSalePaymentMethod) {
+        confirmSalePaymentMethod.addEventListener('change', function() {
+            const installmentFields = document.getElementById('installment-fields');
+            const needsInstallments = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(this.value);
+            installmentFields.classList.toggle('hidden', !needsInstallments);
+            
+            if (needsInstallments) {
+                const today = new Date();
+                today.setDate(today.getDate() + 30); // 30 dias padrão
+                document.getElementById('confirm-sale-first-due-date').value = today.toISOString().split('T')[0];
+            }
+        });
+    }
+
+    // Modal de venda manual
+    const salePaymentMethod = document.getElementById('sale-payment-method');
+    if (salePaymentMethod) {
+        salePaymentMethod.addEventListener('change', function() {
+            const installmentFields = document.getElementById('sale-installment-fields');
+            const needsInstallments = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(this.value);
+            installmentFields.classList.toggle('hidden', !needsInstallments);
+            
+            if (needsInstallments) {
+                const today = new Date();
+                today.setDate(today.getDate() + 30); // 30 dias padrão
+                document.getElementById('sale-first-due-date').value = today.toISOString().split('T')[0];
+            }
+        });
+    }
+
+    // Modal de compra
+    const purchasePaymentMethod = document.getElementById('purchase-payment-method');
+    if (purchasePaymentMethod) {
+        purchasePaymentMethod.addEventListener('change', function() {
+            const paymentDetailsFields = document.getElementById('payment-details-fields');
+            const needsDetails = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(this.value);
+            paymentDetailsFields.classList.toggle('hidden', !needsDetails);
+            
+            if (needsDetails) {
+                const today = new Date();
+                today.setDate(today.getDate() + 30); // 30 dias padrão
+                document.getElementById('purchase-first-due-date').value = today.toISOString().split('T')[0];
+            }
+        });
+    }
 });
