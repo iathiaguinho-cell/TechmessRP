@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Techmess ERP</title>
+    <title>Techmess ERP - Sistema Profissional de Gestão</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="./css/styles.css" rel="stylesheet">
 </head>
@@ -32,7 +35,7 @@
             <section id="public-view">
                 <h2 class="text-3xl font-semibold mb-6 text-center">Nossos Produtos</h2>
                 <div id="product-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                    </div>
+                </div>
             </section>
 
             <section id="management-panel" class="hidden">
@@ -45,35 +48,54 @@
                         <li><button data-tab="customers" class="tab-button py-2 px-4 font-medium border-b-2 border-transparent text-gray-300 hover:text-white">Clientes</button></li>
                         <li><button data-tab="finance" class="tab-button py-2 px-4 font-medium border-b-2 border-transparent text-gray-300 hover:text-white">Financeiro</button></li>
                         <li><button data-tab="suppliers" class="tab-button py-2 px-4 font-medium border-b-2 border-transparent text-gray-300 hover:text-white">Fornecedores</button></li>
+                        <li><button data-tab="reports" class="tab-button py-2 px-4 font-medium border-b-2 border-transparent text-gray-300 hover:text-white">Relatórios</button></li>
                     </ul>
                 </nav>
 
+                <!-- DASHBOARD -->
                 <div id="dashboard-content" class="tab-content">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-2xl font-semibold">Dashboard</h3>
                         <button id="reset-system-button" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded">Zerar Sistema</button>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg"><p class="text-lg">Faturamento do Mês: <span id="monthly-revenue" class="font-bold text-cyan-400">R$ 0,00</span></p></div>
-                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg"><p class="text-lg">Vendas do Dia: <span id="daily-sales" class="font-bold text-cyan-400">R$ 0,00</span></p></div>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                            <p class="text-lg">Faturamento do Mês</p>
+                            <p id="monthly-revenue" class="font-bold text-cyan-400 text-2xl">R$ 0,00</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                            <p class="text-lg">Vendas do Dia</p>
+                            <p id="daily-sales" class="font-bold text-cyan-400 text-2xl">R$ 0,00</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                            <p class="text-lg">Produtos em Estoque</p>
+                            <p id="total-stock" class="font-bold text-green-400 text-2xl">0</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                            <p class="text-lg">Contas a Receber</p>
+                            <p id="pending-receivables" class="font-bold text-yellow-400 text-2xl">R$ 0,00</p>
+                        </div>
                     </div>
-                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg mt-6">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
                         <h4 class="text-xl font-semibold mb-3">Alertas de Estoque Baixo</h4>
                         <ul id="low-stock-alerts" class="list-disc list-inside space-y-2"></ul>
                     </div>
                 </div>
 
+                <!-- VENDAS -->
                 <div id="sales-content" class="tab-content hidden">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-2xl font-semibold">Pedidos Pendentes (Aguardando Confirmação)</h3>
-                        <button id="new-sale-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Gerar Venda</button>
+                        <h3 class="text-2xl font-semibold">Pedidos Pendentes</h3>
+                        <button id="new-sale-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Nova Venda</button>
                     </div>
-                    <div id="pending-orders" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
+                    <div id="pending-orders" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg mb-8"></div>
                     
-                    <h3 class="text-2xl font-semibold mb-4 mt-8">Histórico de Vendas Confirmadas</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-semibold">Histórico de Vendas</h3>
+                    </div>
                     <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-4">
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <input type="text" id="sales-history-filter-product" placeholder="Filtrar por nome do produto..." class="form-input">
+                            <input type="text" id="sales-history-filter-product" placeholder="Filtrar por produto..." class="form-input">
                             <input type="text" id="sales-history-filter-identifier" placeholder="Filtrar por identificador..." class="form-input">
                             <button id="apply-sales-history-filter" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Aplicar Filtro</button>
                         </div>
@@ -81,67 +103,96 @@
                     <div id="sales-history-list" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
                 </div>
                 
-                <div id="customers-content" class="tab-content hidden">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-2xl font-semibold">Gestão de Clientes</h3>
-                        <button id="add-customer-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Adicionar Cliente</button>
-                    </div>
-                    <div id="customer-list" class="overflow-x-auto"></div>
-                </div>
-
+                <!-- COMPRAS -->
                 <div id="purchases-content" class="tab-content hidden">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-2xl font-semibold">Registro de Compras</h3>
                         <button id="new-purchase-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Nova Compra</button>
                     </div>
-                    <div id="purchase-list" class="overflow-x-auto"></div>
+                    <div id="purchase-list" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
                 </div>
 
+                <!-- ESTOQUE -->
                 <div id="stock-content" class="tab-content hidden">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-2xl font-semibold">Gestão de Estoque</h3>
-                        <button id="add-product-model-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Adicionar Modelo de Produto</button>
+                        <button id="add-product-model-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Novo Modelo</button>
                     </div>
                     <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <input type="text" id="stock-filter-product" placeholder="Buscar por modelo..." class="form-input">
-                            <input type="text" id="stock-filter-identifier" placeholder="Buscar por identificador (Nº Série)..." class="form-input">
+                            <input type="text" id="stock-filter-identifier" placeholder="Buscar por identificador..." class="form-input">
                         </div>
                     </div>
-                    <div id="product-management-list" class="overflow-x-auto"></div>
+                    <div id="product-management-list" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
                 </div>
 
+                <!-- CLIENTES -->
+                <div id="customers-content" class="tab-content hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-semibold">Gestão de Clientes</h3>
+                        <button id="add-customer-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Novo Cliente</button>
+                    </div>
+                    <div id="customer-list" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
+                </div>
+
+                <!-- FINANCEIRO -->
                 <div id="finance-content" class="tab-content hidden">
-                    <div class="flex justify-between items-center">
-                        <h3 class="text-2xl font-semibold mb-4">Financeiro</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-semibold">Financeiro</h3>
+                        <button id="new-expense-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Nova Despesa</button>
                     </div>
                     <div class="bg-gray-800 p-6 rounded-lg shadow-lg mb-6">
                         <p class="text-2xl font-bold">Saldo de Caixa: <span id="cash-balance" class="text-green-400">R$ 0,00</span></p>
                     </div>
-                     <h4 class="text-xl font-semibold mb-4">Contas a Receber</h4>
-                    <div id="accounts-receivable" class="overflow-x-auto mb-8"></div>
-                    <div class="flex justify-between items-center mb-4">
-                        <h4 class="text-xl font-semibold">Contas a Pagar</h4>
-                        <button id="new-expense-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Lançar Nova Despesa</button>
-                    </div>
-                    <div id="accounts-payable" class="overflow-x-auto"></div>
+                    
+                    <h4 class="text-xl font-semibold mb-4">Contas a Receber</h4>
+                    <div id="accounts-receivable" class="overflow-x-auto mb-8 bg-gray-800 p-4 rounded-lg shadow-lg"></div>
+                    
+                    <h4 class="text-xl font-semibold mb-4">Contas a Pagar</h4>
+                    <div id="accounts-payable" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
                 </div>
 
+                <!-- FORNECEDORES -->
                 <div id="suppliers-content" class="tab-content hidden">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-2xl font-semibold">Fornecedores</h3>
-                        <button id="add-supplier-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Adicionar Fornecedor</button>
+                        <button id="add-supplier-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Novo Fornecedor</button>
                     </div>
-                    <div id="supplier-list" class="overflow-x-auto"></div>
+                    <div id="supplier-list" class="overflow-x-auto bg-gray-800 p-4 rounded-lg shadow-lg"></div>
+                </div>
+
+                <!-- RELATÓRIOS -->
+                <div id="reports-content" class="tab-content hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-semibold">Relatórios</h3>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-4">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <input type="text" id="reports-filter-product" placeholder="Filtrar por produto..." class="form-input">
+                            <input type="text" id="reports-filter-identifier" placeholder="Filtrar por identificador..." class="form-input">
+                            <input type="date" id="reports-filter-date-start" class="form-input">
+                            <input type="date" id="reports-filter-date-end" class="form-input">
+                        </div>
+                        <div class="mt-4">
+                            <button id="generate-sales-report" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2">Relatório de Vendas</button>
+                            <button id="generate-stock-report" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mr-2">Relatório de Estoque</button>
+                            <button id="generate-financial-report" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">Relatório Financeiro</button>
+                        </div>
+                    </div>
+                    <div id="reports-output" class="bg-gray-800 p-4 rounded-lg shadow-lg"></div>
                 </div>
             </section>
         </main>
 
         <footer class="bg-gray-800 p-4 text-center text-gray-500 shadow-inner mt-auto">
-            <p>&copy; 2025 Techmess ERP. Todos os direitos reservados.</p>
+            <p>&copy; 2025 Techmess ERP - Sistema Profissional de Gestão. Todos os direitos reservados.</p>
         </footer>
     </div>
 
+    <!-- MODAIS -->
+    
+    <!-- Modal do Carrinho -->
     <div id="cart-modal" class="modal-backdrop hidden">
         <div class="modal-content">
             <h3 class="text-xl font-semibold mb-4">Seu Carrinho</h3>
@@ -154,6 +205,7 @@
         </div>
     </div>
 
+    <!-- Modal de Checkout -->
     <div id="checkout-modal" class="modal-backdrop hidden">
         <div class="modal-content">
             <h3 class="text-xl font-semibold mb-4">Informações para Checkout</h3>
@@ -165,187 +217,243 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Modal de Confirmação de Venda -->
+    <div id="payment-confirmation-modal" class="modal-backdrop hidden">
+        <div class="modal-content lg:w-2/3">
+            <h3 class="text-xl font-semibold mb-4">Confirmar Venda</h3>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Forma de Pagamento</label>
+                <select id="confirm-sale-payment-method" class="form-input w-full">
+                    <option>Pix</option>
+                    <option>Dinheiro</option>
+                    <option>Boleto</option>
+                    <option>Cartão de Crédito</option>
+                    <option>Carteira Digital</option>
+                </select>
+            </div>
+            <div id="installment-fields" class="hidden mb-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Parcelas</label>
+                        <input type="number" id="confirm-sale-installments" min="1" max="12" value="1" class="form-input w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Primeiro Vencimento</label>
+                        <input type="date" id="confirm-sale-first-due-date" class="form-input w-full">
+                    </div>
+                </div>
+            </div>
+            <div id="order-items-to-confirm" class="space-y-3 mb-4"></div>
+            <p class="text-lg font-bold mb-4">Total: <span id="confirm-sale-total">R$ 0,00</span></p>
+            <div class="flex gap-4">
+                <button id="close-payment-confirmation-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="process-sale-confirmation-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Confirmar Venda</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Nova Venda Manual -->
+    <div id="manual-sale-modal" class="modal-backdrop hidden">
+        <div class="modal-content lg:w-2/3">
+            <h3 class="text-xl font-semibold mb-4">Nova Venda Manual</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <select id="sale-customer" class="form-input">
+                    <option value="">Selecione o Cliente</option>
+                </select>
+                <input type="date" id="sale-date" class="form-input">
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <select id="sale-product-model" class="form-input">
+                    <option value="">Selecione o Modelo</option>
+                </select>
+                <select id="sale-product-identifier" class="form-input">
+                    <option value="">Selecione o Identificador</option>
+                </select>
+                <input type="number" id="sale-price" placeholder="Preço de Venda" class="form-input" step="0.01">
+            </div>
+            <button id="add-item-to-sale-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-4">Adicionar Item</button>
+            <div id="sale-items-list" class="mb-4 space-y-2"></div>
+            <p class="text-lg font-bold mb-4">Total: <span id="sale-total">R$ 0,00</span></p>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Forma de Pagamento</label>
+                <select id="sale-payment-method" class="form-input w-full">
+                    <option>Pix</option>
+                    <option>Dinheiro</option>
+                    <option>Boleto</option>
+                    <option>Cartão de Crédito</option>
+                    <option>Carteira Digital</option>
+                </select>
+            </div>
+            <div id="sale-installment-fields" class="hidden mb-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Parcelas</label>
+                        <input type="number" id="sale-installments" min="1" max="12" value="1" class="form-input w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Primeiro Vencimento</label>
+                        <input type="date" id="sale-first-due-date" class="form-input w-full">
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-4">
+                <button id="close-manual-sale-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-manual-sale-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Salvar Venda</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Cliente -->
     <div id="customer-form-modal" class="modal-backdrop hidden">
         <div class="modal-content">
-            <h3 class="text-xl font-semibold mb-4" id="customer-form-title">Adicionar Cliente</h3>
+            <h3 class="text-xl font-semibold mb-4" id="customer-form-title">Novo Cliente</h3>
             <input type="hidden" id="customer-id">
             <input type="text" id="new-customer-name" placeholder="Nome do Cliente" class="form-input w-full mb-4">
             <input type="text" id="new-customer-whatsapp" placeholder="WhatsApp (Ex: 11999998888)" class="form-input w-full mb-4">
             <input type="email" id="new-customer-email" placeholder="E-mail (Opcional)" class="form-input w-full mb-4">
             <textarea id="new-customer-notes" placeholder="Observações (Opcional)" class="form-input w-full mb-4"></textarea>
             <div class="flex gap-4">
-                <button id="close-customer-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Fechar</button>
-                <button id="save-customer-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Cliente</button>
+                <button id="close-customer-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-customer-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar</button>
             </div>
         </div>
     </div>
 
+    <!-- Modal de Modelo de Produto -->
     <div id="product-model-form-modal" class="modal-backdrop hidden">
-        <div class="modal-content md:w-1/2">
-            <h3 class="text-xl font-semibold mb-4" id="product-model-form-title">Adicionar Modelo de Produto</h3>
+        <div class="modal-content md:w-2/3">
+            <h3 class="text-xl font-semibold mb-4" id="product-model-form-title">Novo Modelo de Produto</h3>
             <input type="hidden" id="product-model-id">
             <input type="text" id="product-model-name" placeholder="Nome do Modelo (Ex: Garmin Fenix 7)" class="form-input w-full mb-4">
             <input type="number" id="product-model-price" placeholder="Preço de Venda Padrão" class="form-input w-full mb-4" step="0.01">
             <textarea id="product-model-description" placeholder="Descrição" class="form-input w-full mb-4"></textarea>
             <input type="number" id="product-model-alert-level" placeholder="Nível de Alerta de Estoque" class="form-input w-full mb-4">
             <input type="file" id="product-model-image-upload" accept="image/*" class="form-input w-full mb-4">
+            
+            <!-- Seção para adicionar identificadores -->
+            <div class="border-t border-gray-700 pt-4 mb-4">
+                <h4 class="text-lg font-semibold mb-2">Adicionar Unidades ao Estoque</h4>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Identificadores (Nº de Série/IMEI) - um por linha</label>
+                    <textarea id="product-model-identifiers" placeholder="Digite um identificador por linha&#10;Ex:&#10;X3V829&#10;A1B2C3&#10;Z9Y8X7" class="form-input w-full" rows="4"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Custo de Compra por Unidade (R$)</label>
+                    <input type="number" id="product-model-unit-cost" placeholder="Custo unitário" class="form-input w-full" step="0.01">
+                </div>
+            </div>
+            
             <div class="flex gap-4">
-                <button id="close-product-model-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Fechar</button>
-                <button id="save-product-model-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Modelo</button>
+                <button id="close-product-model-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-product-model-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar</button>
             </div>
         </div>
     </div>
 
+    <!-- Modal de Fornecedor -->
     <div id="supplier-form-modal" class="modal-backdrop hidden">
         <div class="modal-content">
-            <h3 class="text-xl font-semibold mb-4" id="supplier-form-title">Adicionar Fornecedor</h3>
+            <h3 class="text-xl font-semibold mb-4" id="supplier-form-title">Novo Fornecedor</h3>
             <input type="hidden" id="supplier-id">
             <input type="text" id="supplier-name" placeholder="Nome do Fornecedor" class="form-input w-full mb-4">
             <input type="text" id="supplier-contact" placeholder="Contato (Telefone, E-mail)" class="form-input w-full mb-4">
             <div class="flex gap-4">
-                <button id="close-supplier-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Fechar</button>
-                <button id="save-supplier-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Fornecedor</button>
+                <button id="close-supplier-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-supplier-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar</button>
             </div>
         </div>
     </div>
-    
+
+    <!-- Modal de Compra -->
     <div id="purchase-form-modal" class="modal-backdrop hidden">
         <div class="modal-content lg:w-2/3">
-            <h3 class="text-xl font-semibold mb-4">Registrar Nova Compra</h3>
+            <h3 class="text-xl font-semibold mb-4">Nova Compra</h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <input type="text" id="purchase-invoice-number" placeholder="Nº Nota Fiscal" class="form-input">
                 <input type="date" id="purchase-date" class="form-input">
                 <select id="purchase-payment-method" class="form-input">
-                    <option>Boleto</option> <option>Cartão de Crédito</option> <option>Pix</option> <option>Dinheiro</option>
+                    <option>Boleto</option>
+                    <option>Cartão de Crédito</option>
+                    <option>Pix</option>
+                    <option>Dinheiro</option>
+                    <option>Carteira Digital</option>
                 </select>
             </div>
-            <div class="mb-4"><select id="purchase-supplier" class="form-input w-full" placeholder="Fornecedor"></select></div>
+            <div class="mb-4">
+                <select id="purchase-supplier" class="form-input w-full">
+                    <option value="">Selecione o Fornecedor</option>
+                </select>
+            </div>
+            <div id="payment-details-fields" class="hidden mb-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Parcelas</label>
+                        <input type="number" id="purchase-installments" min="1" max="12" value="1" class="form-input w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Primeiro Vencimento</label>
+                        <input type="date" id="purchase-first-due-date" class="form-input w-full">
+                    </div>
+                </div>
+            </div>
 
             <div class="border-t border-b border-gray-700 py-4 mb-4">
                 <h4 class="text-lg font-semibold mb-2">Adicionar Itens</h4>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                    <select id="purchase-product" class="form-input w-full"></select>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end mb-4">
+                    <select id="purchase-product" class="form-input w-full">
+                        <option value="">Selecione o Modelo</option>
+                    </select>
                     <input type="number" id="purchase-unit-price" placeholder="Custo Unitário (R$)" class="form-input" step="0.01">
                 </div>
-                <div class="mt-4">
+                <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-300 mb-1">Identificadores (Nº de Série) - um por linha</label>
-                    <textarea id="purchase-identifiers" rows="4" placeholder="X3V829&#10;Y4A930&#10;Z5B123" class="form-input w-full"></textarea>
+                    <textarea id="purchase-identifiers" placeholder="Digite um identificador por linha&#10;Ex:&#10;X3V829&#10;A1B2C3&#10;Z9Y8X7" class="form-input w-full" rows="4"></textarea>
                 </div>
-                <button id="add-item-to-purchase-button" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Adicionar Itens à Nota</button>
+                <button id="add-item-to-purchase-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Adicionar Item</button>
             </div>
 
-            <h4 class="text-lg font-semibold mb-2">Itens na Nota</h4>
-            <div id="purchase-items-list" class="mb-4 max-h-48 overflow-y-auto"></div>
-            <p class="text-lg font-bold text-right mb-6">Total da Compra: <span id="purchase-total">R$ 0,00</span></p>
-            <div class="flex gap-4">
-                <button id="close-purchase-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Fechar</button>
-                <button id="save-purchase-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Compra</button>
-            </div>
-        </div>
-    </div>
-    
-    <div id="manual-sale-modal" class="modal-backdrop hidden">
-        <div class="modal-content lg:w-2/3">
-            <h3 class="text-xl font-semibold mb-4">Gerar Nova Venda Manual</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <select id="sale-customer" class="form-input w-full"></select>
-                <input type="date" id="sale-date" class="form-input w-full">
-            </div>
-    
-            <div class="border-t border-b border-gray-700 py-4 mb-4">
-                <h4 class="text-lg font-semibold mb-2">Adicionar Produto</h4>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div class="md:col-span-2">
-                        <label class="block text-sm font-medium text-gray-300 mb-1">Produto (Modelo)</label>
-                        <select id="sale-product-model" class="form-input w-full"></select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-1">Identificador</label>
-                        <select id="sale-product-identifier" class="form-input w-full"></select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-1">Preço Venda</label>
-                        <input type="number" id="sale-price" class="form-input w-full" step="0.01" min="0">
-                    </div>
-                </div>
-                <button id="add-item-to-sale-button" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Adicionar Produto</button>
-            </div>
-    
-            <h4 class="text-lg font-semibold mb-2">Itens da Venda</h4>
-            <div id="sale-items-list" class="mb-4 max-h-48 overflow-y-auto"></div>
-            <p class="text-lg font-bold text-right mb-6">Total da Venda: <span id="sale-total">R$ 0,00</span></p>
+            <div id="purchase-items-list" class="mb-4 space-y-2"></div>
+            <p class="text-lg font-bold mb-4">Total: <span id="purchase-total">R$ 0,00</span></p>
             
-            <div class="mb-4">
-                <select id="sale-payment-method" class="form-input w-full">
-                    <option value="Pix">Pix</option> <option value="Boleto">Boleto</option> <option value="Cartão de Crédito">Cartão de Crédito</option> <option value="Carteira">Carteira</option> <option value="Depósito">Depósito</option>
-                </select>
-            </div>
-    
             <div class="flex gap-4">
-                <button id="close-manual-sale-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Fechar</button>
-                <button id="save-manual-sale-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Venda</button>
+                <button id="close-purchase-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-purchase-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Salvar Compra</button>
             </div>
         </div>
     </div>
 
-    <div id="payment-confirmation-modal" class="modal-backdrop hidden">
-        <div class="modal-content lg:w-2/3">
-            <h3 class="text-xl font-semibold mb-4">Confirmar Venda e Pagamento</h3>
-            <input type="hidden" id="confirm-sale-order-id">
-            
-            <div id="order-items-to-confirm" class="space-y-4 mb-4">
-                </div>
-            
-            <p class="text-lg font-bold text-right mb-6">Total da Venda: <span id="confirm-sale-total">R$ 0,00</span></p>
-
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-300 mb-1">Forma de Pagamento</label>
-                <select id="confirm-sale-payment-method" class="form-input w-full">
-                    <option value="Pix">Pix</option> <option value="Boleto">Boleto</option> <option value="Cartão de Crédito">Cartão de Crédito</option> <option value="Carteira">Carteira</option> <option value="Depósito">Depósito</option>
-                </select>
-            </div>
-
-            <div id="installment-fields" class="hidden grid grid-cols-2 gap-4 mb-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Nº de Parcelas</label>
-                    <input type="number" id="confirm-sale-installments" class="form-input w-full" value="1" min="1">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">1º Vencimento</label>
-                    <input type="date" id="confirm-sale-first-due-date" class="form-input w-full">
-                </div>
-            </div>
-            
-            <div class="flex gap-4">
-                <button id="close-payment-confirmation-modal" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
-                <button id="process-sale-confirmation-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Confirmar Venda</button>
-            </div>
-        </div>
-    </div>
-
+    <!-- Modal de Despesa -->
     <div id="expense-form-modal" class="modal-backdrop hidden">
         <div class="modal-content">
-            <h3 class="text-xl font-semibold mb-4">Lançar Nova Despesa</h3>
-            <input type="text" id="expense-description" placeholder="Descrição (Ex: Conta de Luz)" class="form-input w-full mb-4">
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <input type="number" id="expense-value" placeholder="Valor (R$)" class="form-input w-full" step="0.01">
-                <input type="date" id="expense-due-date" class="form-input w-full">
-            </div>
+            <h3 class="text-xl font-semibold mb-4">Nova Despesa</h3>
+            <input type="text" id="expense-description" placeholder="Descrição da Despesa" class="form-input w-full mb-4">
+            <input type="number" id="expense-value" placeholder="Valor (R$)" class="form-input w-full mb-4" step="0.01">
+            <input type="date" id="expense-due-date" class="form-input w-full mb-4">
             <select id="expense-category" class="form-input w-full mb-4">
-                <option value="Custo Fixo">Custo Fixo</option> <option value="Serviços">Serviços</option> <option value="Marketing">Marketing</option> <option value="Impostos">Impostos</option> <option value="Outros">Outros</option>
+                <option>Custo Fixo</option>
+                <option>Custo Variável</option>
+                <option>Investimento</option>
+                <option>Outros</option>
             </select>
             <div class="flex gap-4">
                 <button id="close-expense-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
-                <button id="save-expense-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar Despesa</button>
+                <button id="save-expense-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar</button>
             </div>
         </div>
     </div>
-    
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-    
+
+    <!-- Modal de Detalhes -->
+    <div id="details-modal" class="modal-backdrop hidden">
+        <div class="modal-content lg:w-3/4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="details-modal-title" class="text-xl font-semibold">Detalhes</h3>
+                <button id="close-details-modal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div id="details-modal-content" class="max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
     <script src="./js/app.js"></script>
 </body>
 </html>
