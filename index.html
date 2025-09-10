@@ -320,7 +320,7 @@
         </div>
     </div>
 
-    <!-- Modal de Modelo de Produto -->
+    <!-- Modal de Modelo de Produto (SIMPLIFICADO) -->
     <div id="product-model-form-modal" class="modal-backdrop hidden">
         <div class="modal-content md:w-2/3">
             <h3 class="text-xl font-semibold mb-4" id="product-model-form-title">Novo Modelo de Produto</h3>
@@ -330,23 +330,29 @@
             <textarea id="product-model-description" placeholder="Descrição" class="form-input w-full mb-4"></textarea>
             <input type="number" id="product-model-alert-level" placeholder="Nível de Alerta de Estoque" class="form-input w-full mb-4">
             <input type="file" id="product-model-image-upload" accept="image/*" class="form-input w-full mb-4">
-            
-            <!-- Seção para adicionar identificadores -->
-            <div class="border-t border-gray-700 pt-4 mb-4">
-                <h4 class="text-lg font-semibold mb-2">Adicionar Unidades ao Estoque</h4>
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Identificadores (Nº de Série/IMEI) - um por linha</label>
-                    <textarea id="product-model-identifiers" placeholder="Digite um identificador por linha&#10;Ex:&#10;X3V829&#10;A1B2C3&#10;Z9Y8X7" class="form-input w-full" rows="4"></textarea>
-                </div>
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Custo de Compra por Unidade (R$)</label>
-                    <input type="number" id="product-model-unit-cost" placeholder="Custo unitário" class="form-input w-full" step="0.01">
-                </div>
-            </div>
-            
             <div class="flex gap-4">
                 <button id="close-product-model-form-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
                 <button id="save-product-model-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOVO MODAL: Adicionar Estoque (Correção Manual) -->
+    <div id="add-stock-modal" class="modal-backdrop hidden">
+        <div class="modal-content">
+            <h3 class="text-xl font-semibold mb-4" id="add-stock-modal-title">Adicionar Estoque</h3>
+            <input type="hidden" id="add-stock-model-id">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-300 mb-1">Identificadores (Nº de Série/IMEI) - um por linha</label>
+                <textarea id="add-stock-identifiers" placeholder="Digite um identificador por linha&#10;Ex:&#10;X3V829&#10;A1B2C3" class="form-input w-full" rows="4"></textarea>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-300 mb-1">Custo de Compra por Unidade (R$)</label>
+                <input type="number" id="add-stock-unit-cost" placeholder="Custo unitário" class="form-input w-full" step="0.01">
+            </div>
+            <div class="flex gap-4">
+                <button id="close-add-stock-modal" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Cancelar</button>
+                <button id="save-stock-units-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded">Adicionar ao Estoque</button>
             </div>
         </div>
     </div>
