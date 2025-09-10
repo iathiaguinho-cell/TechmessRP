@@ -1,10 +1,13 @@
 /**
  * Techmess ERP - Sistema Profissional de Gestão
- * Versão 5.0 - Build Estável com Cálculo de Lucro
+ * Versão 5.1 - Build Estável
  * * Novas Funcionalidades:
  * - Cálculo e armazenamento do lucro em cada venda.
  * - Exibição do lucro nos detalhes da venda e nos relatórios de vendas.
- * * Correções Anteriores Incluídas:
+ * * Correções de Bugs:
+ * - Corrigido bug que criava "unidade fantasma" no estoque ao cadastrar um novo modelo de produto.
+ * - Corrigida a lógica para que o Dashboard seja atualizado após ações críticas (ex: recebimento de compra).
+ * - Robustecida a geração de relatórios para evitar falhas silenciosas.
  * - Adicionado event listener ao botão "Dashboard" da navegação.
  * - Corrigido o problema de contexto (`this`) em todos os event listeners.
  * - Restaurada a lógica de negócio para criação de Contas a Pagar APENAS no recebimento da compra.
@@ -387,6 +390,7 @@ const Stock = {
         database.ref('produtos').on('value', snapshot => {
             AppState.products = snapshot.val() || {};
             this.renderStockTable();
+            Dashboard.updateDashboard(); // Garante que o dashboard seja atualizado com os dados de estoque mais recentes.
         });
     },
     renderStockTable(filteredProducts = null) {
@@ -452,10 +456,18 @@ const Stock = {
         const alertLevel = parseInt(document.getElementById('product-model-alert-level').value) || 0;
         const imageFile = document.getElementById('product-model-image-upload').files[0];
         const identifiers = document.getElementById('product-model-identifiers').value.trim();
-        const unitCost = parseFloat(document.getElementById('product-model-unit-cost').value) || 0;
+        const unitCostField = document.getElementById('product-model-unit-cost');
+        const unitCost = parseFloat(unitCostField.value) || 0;
 
         if (!Utils.validateForm([document.getElementById('product-model-name'), document.getElementById('product-model-price')])) {
-            Utils.showNotification('Por favor, preencha todos os campos obrigatórios.', 'error');
+            Utils.showNotification('Por favor, preencha nome e preço.', 'error');
+            return;
+        }
+
+        // *** CORREÇÃO APLICADA AQUI ***
+        if (identifiers && (!unitCost || unitCost <= 0)) {
+            Utils.showNotification('Para adicionar unidades, o custo deve ser maior que zero.', 'error');
+            Utils.validateForm([unitCostField]);
             return;
         }
 
@@ -474,6 +486,9 @@ const Stock = {
                 }
             }
 
+            const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
+            const modelId = id || dbRef.key;
+
             const productData = {
                 nome: name,
                 nome_lowercase: name.toLowerCase(),
@@ -481,12 +496,12 @@ const Stock = {
                 descricao: description,
                 nivelAlertaEstoque: alertLevel,
                 imagem: imageUrl,
-                dataAtualizacao: new Date().toISOString(),
-                unidades: (id && AppState.products[id] && AppState.products[id].unidades) || {}
+                dataAtualizacao: new Date().toISOString()
             };
-
-            const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
-            const modelId = id || dbRef.key;
+            
+            if (!id) {
+                productData.unidades = {}; // Garante que o nó unidades exista para novos produtos
+            }
 
             await dbRef.update(productData);
 
@@ -620,7 +635,6 @@ const Sales = {
         }
         const tableRows = salesEntries.map(([id, sale]) => {
             const itemsList = Object.values(sale.itens).map(item => `<div class="text-xs p-1 bg-gray-700 rounded mb-1">${item.nome} (S/N: ${item.identifier}) - ${Utils.formatCurrency(item.precoVenda)}</div>`).join('');
-            const paymentInfo = sale.pagamento ? `${sale.pagamento.metodo} ${sale.pagamento.parcelas ? `(${sale.pagamento.parcelas}x)` : ''}` : 'N/A';
             return `
                 <tr class="clickable-row" data-type="sale" data-id="${id}">
                     <td>${Utils.formatDate(sale.data)}</td>
@@ -843,7 +857,7 @@ const Sales = {
                 </div>
                 <div class="text-right">
                     <div class="font-semibold">${Utils.formatCurrency(item.precoVenda)}</div>
-                    <div class="text-xs text-gray-400">Custo: ${Utils.formatCurrency(item.custoCompra)}</div>
+                    <div class="text-xs text-gray-400">Custo: ${Utils.formatCurrency(item.custoCompra || 0)}</div>
                 </div>
             </div>`).join('');
         const content = `
@@ -866,7 +880,6 @@ const Sales = {
             </div>`;
         UI.showDetailsModal(`Venda #${saleId.slice(-5)}`, content);
     },
-    // ... (demais funções de Sales) ...
     openPaymentConfirmationModal(orderId) {
         AppState.currentOrderToConfirm = { id: orderId, ...window.pendingOrdersData[orderId] };
         const order = AppState.currentOrderToConfirm;
@@ -1017,7 +1030,6 @@ const Sales = {
     }
 };
 
-// ... (Purchases, Customers, Suppliers, Finance, Dashboard) ...
 const Purchases = {
     loadPurchases() {
         database.ref('compras').on('value', snapshot => {
@@ -1211,6 +1223,7 @@ const Purchases = {
             }
             await purchaseRef.update({ status: 'Recebido', dataRecebimento: new Date().toISOString() });
             Utils.showNotification('Recebimento confirmado! Estoque atualizado e contas a pagar geradas!', 'success');
+            Dashboard.updateDashboard(); // *** CORREÇÃO: Atualiza o dashboard após a mudança no estoque.
         } catch (error) {
             console.error("Erro ao confirmar recebimento:", error);
             Utils.showNotification('Erro ao confirmar recebimento: ' + error.message, 'error');
@@ -1551,7 +1564,7 @@ const Finance = {
             const totalPaid = Object.values(payables).filter(account => account.status === 'Paga').reduce((sum, account) => sum + account.valor, 0);
             const balance = totalReceived - totalPaid;
             DOM.cashBalance.textContent = Utils.formatCurrency(balance);
-            DOM.cashBalance.className = balance >= 0 ? 'text-green-400' : 'text-red-400';
+            DOM.cashBalance.className = balance >= 0 ? 'font-bold text-2xl text-green-400' : 'font-bold text-2xl text-red-400';
             const pendingReceivables = Object.values(receivables).filter(account => account.status === 'Pendente').reduce((sum, account) => sum + account.valor, 0);
             if (DOM.pendingReceivables) {
                 DOM.pendingReceivables.textContent = Utils.formatCurrency(pendingReceivables);
@@ -1639,6 +1652,7 @@ const Dashboard = {
         this.calculateDailySalesAndMonthlyRevenue();
         this.updateStockCount();
         this.checkLowStockAlerts();
+        Finance.calculateCashBalance(); // Garante que o saldo do financeiro seja atualizado
     },
     async calculateDailySalesAndMonthlyRevenue() {
         try {
@@ -1698,72 +1712,173 @@ const Reports = {
         const identifierFilter = DOM.reportsFilterIdentifier.value.toLowerCase().trim();
         const startDate = DOM.reportsFilterDateStart.value;
         const endDate = DOM.reportsFilterDateEnd.value;
-        database.ref('vendas').once('value', snapshot => {
-            const sales = snapshot.val() || {};
-            let filteredSales = Object.entries(sales);
-            if (startDate) {
-                filteredSales = filteredSales.filter(([id, sale]) => new Date(sale.data) >= new Date(startDate + 'T00:00:00Z'));
-            }
-            if (endDate) {
-                filteredSales = filteredSales.filter(([id, sale]) => new Date(sale.data) <= new Date(endDate + 'T23:59:59Z'));
-            }
-            if (productFilter || identifierFilter) {
-                filteredSales = filteredSales.filter(([id, sale]) => {
-                    for (const item of Object.values(sale.itens)) {
-                        const nameMatch = !productFilter || item.nome.toLowerCase().includes(productFilter);
-                        const identifierMatch = !identifierFilter || item.identifier.toLowerCase().includes(identifierFilter);
-                        if (nameMatch && identifierMatch) return true;
-                    }
-                    return false;
-                });
-            }
-            const totalSales = filteredSales.length;
-            const totalRevenue = filteredSales.reduce((sum, [id, sale]) => sum + sale.total, 0);
-            const totalProfit = filteredSales.reduce((sum, [id, sale]) => sum + (sale.lucro || 0), 0);
-            const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+        
+        let filteredSales = Object.entries(AppState.salesHistory);
+        if (startDate) {
+            filteredSales = filteredSales.filter(([id, sale]) => new Date(sale.data) >= new Date(startDate + 'T00:00:00Z'));
+        }
+        if (endDate) {
+            filteredSales = filteredSales.filter(([id, sale]) => new Date(sale.data) <= new Date(endDate + 'T23:59:59Z'));
+        }
+        if (productFilter || identifierFilter) {
+            filteredSales = filteredSales.filter(([id, sale]) => {
+                for (const item of Object.values(sale.itens)) {
+                    const nameMatch = !productFilter || item.nome.toLowerCase().includes(productFilter);
+                    const identifierMatch = !identifierFilter || item.identifier.toLowerCase().includes(identifierFilter);
+                    if (nameMatch && identifierMatch) return true;
+                }
+                return false;
+            });
+        }
+        
+        if (filteredSales.length === 0) {
+            DOM.reportsOutput.innerHTML = '<p class="empty-state">Nenhuma venda encontrada para os filtros selecionados.</p>';
+            return;
+        }
 
-            const reportContent = `
-                <div class="space-y-6">
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div class="bg-gray-700 p-4 rounded text-center">
-                            <div class="text-2xl font-bold text-cyan-400">${totalSales}</div>
-                            <div class="text-sm text-gray-400">Total de Vendas</div>
-                        </div>
-                        <div class="bg-gray-700 p-4 rounded text-center">
-                            <div class="text-2xl font-bold text-yellow-400">${Utils.formatCurrency(averageTicket)}</div>
-                            <div class="text-sm text-gray-400">Ticket Médio</div>
-                        </div>
-                        <div class="bg-gray-700 p-4 rounded text-center">
-                            <div class="text-2xl font-bold text-green-400">${Utils.formatCurrency(totalRevenue)}</div>
-                            <div class="text-sm text-gray-400">Faturamento Total</div>
-                        </div>
-                        <div class="bg-gray-700 p-4 rounded text-center">
-                            <div class="text-2xl font-bold text-green-400">${Utils.formatCurrency(totalProfit)}</div>
-                            <div class="text-sm text-gray-400">Lucro Total</div>
-                        </div>
+        const totalSales = filteredSales.length;
+        const totalRevenue = filteredSales.reduce((sum, [id, sale]) => sum + sale.total, 0);
+        const totalProfit = filteredSales.reduce((sum, [id, sale]) => sum + (sale.lucro || 0), 0);
+        const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+        const reportContent = `
+            <div class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-cyan-400">${totalSales}</div>
+                        <div class="text-sm text-gray-400">Total de Vendas</div>
                     </div>
-                    <div>
-                        <h4 class="text-lg font-semibold mb-3">Detalhes das Vendas</h4>
-                        <div class="max-h-60 overflow-y-auto space-y-1">
-                            ${filteredSales.map(([id, sale]) => `
-                                <div class="text-xs p-2 bg-gray-700 rounded">
-                                    <div class="grid grid-cols-4 gap-2">
-                                        <span>${Utils.formatDate(sale.data)} - ${sale.cliente}</span>
-                                        <span class="font-semibold text-right">Total: ${Utils.formatCurrency(sale.total)}</span>
-                                        <span class="font-semibold text-green-400 text-right">Lucro: ${Utils.formatCurrency(sale.lucro || 0)}</span>
-                                    </div>
-                                </div>`).join('')}
-                        </div>
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-yellow-400">${Utils.formatCurrency(averageTicket)}</div>
+                        <div class="text-sm text-gray-400">Ticket Médio</div>
                     </div>
-                </div>`;
-            DOM.reportsOutput.innerHTML = reportContent;
-        });
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-green-400">${Utils.formatCurrency(totalRevenue)}</div>
+                        <div class="text-sm text-gray-400">Faturamento Total</div>
+                    </div>
+                    <div class="bg-gray-700 p-4 rounded text-center">
+                        <div class="text-2xl font-bold text-green-400">${Utils.formatCurrency(totalProfit)}</div>
+                        <div class="text-sm text-gray-400">Lucro Total</div>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Detalhes das Vendas</h4>
+                    <div class="max-h-60 overflow-y-auto space-y-1">
+                        ${filteredSales.map(([id, sale]) => `
+                            <div class="text-xs p-2 bg-gray-700 rounded">
+                                <div class="grid grid-cols-4 gap-2 items-center">
+                                    <span>${Utils.formatDate(sale.data)} - ${sale.cliente}</span>
+                                    <span class="font-semibold text-right col-span-2">Total: ${Utils.formatCurrency(sale.total)}</span>
+                                    <span class="font-semibold text-green-400 text-right">Lucro: ${Utils.formatCurrency(sale.lucro || 0)}</span>
+                                </div>
+                            </div>`).join('')}
+                    </div>
+                </div>
+            </div>`;
+        DOM.reportsOutput.innerHTML = reportContent;
     },
     generateStockReport() {
-        // ... (código inalterado)
+        const productFilter = DOM.reportsFilterProduct.value.toLowerCase().trim();
+        const identifierFilter = DOM.reportsFilterIdentifier.value.toLowerCase().trim();
+        let filteredProducts = AppState.products;
+
+        if (productFilter || identifierFilter) {
+            filteredProducts = {};
+            for (const [modelId, product] of Object.entries(AppState.products)) {
+                let matchProduct = !productFilter || product.nome.toLowerCase().includes(productFilter);
+                let matchIdentifier = !identifierFilter;
+                if (identifierFilter && product.unidades) {
+                    for (const identifier of Object.keys(product.unidades)) {
+                        if (identifier.toLowerCase().includes(identifierFilter)) {
+                            matchIdentifier = true;
+                            break;
+                        }
+                    }
+                }
+                if (matchProduct && matchIdentifier) {
+                    filteredProducts[modelId] = product;
+                }
+            }
+        }
+        
+        const productStats = Object.entries(filteredProducts).map(([id, product]) => {
+            const units = product.unidades || {};
+            const available = Object.values(units).filter(u => u.status === 'disponivel');
+            const sold = Object.values(units).filter(u => u.status === 'vendido');
+            const total = Object.keys(units).length;
+            const value = available.reduce((sum, unit) => sum + (unit.custoCompra || 0), 0);
+
+            return { nome: product.nome, available: available.length, sold: sold.length, total, value, price: product.precoVenda || 0 };
+        });
+
+        if (productStats.length === 0) {
+            DOM.reportsOutput.innerHTML = '<p class="empty-state">Nenhum produto encontrado para os filtros selecionados.</p>';
+            return;
+        }
+
+        const totalAvailable = productStats.reduce((sum, p) => sum + p.available, 0);
+        const totalSold = productStats.reduce((sum, p) => sum + p.sold, 0);
+        const totalItems = productStats.reduce((sum, p) => sum + p.total, 0);
+        const totalValue = productStats.reduce((sum, p) => sum + p.value, 0);
+
+        const reportContent = `
+            <div class="space-y-6">
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="bg-gray-700 p-4 rounded text-center"><div class="text-2xl font-bold text-cyan-400">${totalItems}</div><div class="text-sm text-gray-400">Total de Itens</div></div>
+                    <div class="bg-gray-700 p-4 rounded text-center"><div class="text-2xl font-bold text-green-400">${totalAvailable}</div><div class="text-sm text-gray-400">Disponível</div></div>
+                    <div class="bg-gray-700 p-4 rounded text-center"><div class="text-2xl font-bold text-red-400">${totalSold}</div><div class="text-sm text-gray-400">Vendido</div></div>
+                    <div class="bg-gray-700 p-4 rounded text-center"><div class="text-2xl font-bold text-yellow-400">${Utils.formatCurrency(totalValue)}</div><div class="text-sm text-gray-400">Custo em Estoque</div></div>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Detalhes por Produto</h4>
+                    <div class="space-y-2 max-h-60 overflow-y-auto">${productStats.map(product => `<div class="p-3 bg-gray-700 rounded"><div class="flex justify-between items-center"><div><div class="font-semibold">${product.nome}</div><div class="text-sm text-gray-400">Preço Venda: ${Utils.formatCurrency(product.price)}</div></div><div class="text-right"><div class="text-sm"><span class="text-green-400">${product.available} disp.</span> | <span class="text-red-400">${product.sold} vend.</span> | <span class="text-gray-400">${product.total} total</span></div><div class="font-semibold">Custo: ${Utils.formatCurrency(product.value)}</div></div></div></div>`).join('')}</div>
+                </div>
+            </div>`;
+        DOM.reportsOutput.innerHTML = reportContent;
     },
     generateFinancialReport() {
-        // ... (código inalterado)
+        const startDate = DOM.reportsFilterDateStart.value;
+        const endDate = DOM.reportsFilterDateEnd.value;
+        
+        let filteredReceivables = Object.values(AppState.accountsReceivable);
+        let filteredPayables = Object.values(AppState.accountsPayable);
+
+        if (startDate) {
+            const start = new Date(startDate + 'T00:00:00Z');
+            filteredReceivables = filteredReceivables.filter(acc => new Date(acc.dataVencimento) >= start);
+            filteredPayables = filteredPayables.filter(acc => new Date(acc.dataVencimento) >= start);
+        }
+        if (endDate) {
+            const end = new Date(endDate + 'T23:59:59Z');
+            filteredReceivables = filteredReceivables.filter(acc => new Date(acc.dataVencimento) <= end);
+            filteredPayables = filteredPayables.filter(acc => new Date(acc.dataVencimento) <= end);
+        }
+
+        if (filteredReceivables.length === 0 && filteredPayables.length === 0) {
+            DOM.reportsOutput.innerHTML = '<p class="empty-state">Nenhum dado financeiro encontrado para os filtros selecionados.</p>';
+            return;
+        }
+
+        const totalReceivable = filteredReceivables.reduce((sum, acc) => sum + acc.valor, 0);
+        const totalReceived = filteredReceivables.filter(acc => acc.status === 'Recebido').reduce((sum, acc) => sum + acc.valor, 0);
+        const pendingReceivable = totalReceivable - totalReceived;
+        const totalPayable = filteredPayables.reduce((sum, acc) => sum + acc.valor, 0);
+        const totalPaid = filteredPayables.filter(acc => acc.status === 'Paga').reduce((sum, acc) => sum + acc.valor, 0);
+        const pendingPayable = totalPayable - totalPaid;
+        const netCashFlow = totalReceived - totalPaid;
+
+        const reportContent = `
+            <div class="space-y-6">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-green-800 p-4 rounded"><h4 class="text-lg font-semibold mb-2 text-green-200">Contas a Receber</h4><div class="space-y-1"><div class="flex justify-between"><span>Total a Receber:</span><span class="font-bold">${Utils.formatCurrency(totalReceivable)}</span></div><div class="flex justify-between"><span>Já Recebido:</span><span class="font-bold">${Utils.formatCurrency(totalReceived)}</span></div><div class="flex justify-between border-t border-green-600 pt-1"><span>Pendente:</span><span class="font-bold">${Utils.formatCurrency(pendingReceivable)}</span></div></div></div>
+                    <div class="bg-red-800 p-4 rounded"><h4 class="text-lg font-semibold mb-2 text-red-200">Contas a Pagar</h4><div class="space-y-1"><div class="flex justify-between"><span>Total a Pagar:</span><span class="font-bold">${Utils.formatCurrency(totalPayable)}</span></div><div class="flex justify-between"><span>Já Pago:</span><span class="font-bold">${Utils.formatCurrency(totalPaid)}</span></div><div class="flex justify-between border-t border-red-600 pt-1"><span>Pendente:</span><span class="font-bold">${Utils.formatCurrency(pendingPayable)}</span></div></div></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-${netCashFlow >= 0 ? 'green' : 'red'}-800 p-4 rounded text-center"><div class="text-2xl font-bold">${Utils.formatCurrency(netCashFlow)}</div><div class="text-sm text-gray-300">Fluxo de Caixa Líquido</div></div>
+                    <div class="bg-purple-800 p-4 rounded text-center"><div class="text-2xl font-bold">${Utils.formatCurrency(pendingReceivable - pendingPayable)}</div><div class="text-sm text-gray-300">Saldo Projetado</div></div>
+                </div>
+            </div>`;
+        DOM.reportsOutput.innerHTML = reportContent;
     }
 };
 
@@ -1932,7 +2047,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Auth.init();
     EventListeners.init();
     Shop.loadPublicProducts();
-    console.log('Techmess ERP v4.3 - Sistema Profissional de Gestão inicializado com sucesso!');
+    console.log('Techmess ERP v5.1 - Sistema Profissional de Gestão inicializado com sucesso!');
 });
 
 window.TechmessERP = {
@@ -1950,3 +2065,4 @@ window.TechmessERP = {
     Utils,
     UI
 };
+
