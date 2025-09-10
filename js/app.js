@@ -1,10 +1,11 @@
 /**
  * Techmess ERP - Sistema Profissional de Gestão
- * Versão 4.1 - CORRIGIDA E VERIFICADA
- * * Build estável com todas as funcionalidades operacionais.
- * - Lógica de negócio de Compras/Contas a Pagar restaurada.
- * - UI do modal de Venda Manual corrigida.
- * - Listeners de eventos centralizados e código limpo.
+ * Versão 4.2 - Build Estável
+ * * Correções implementadas:
+ * - Corrigido o problema de contexto (`this`) em todos os event listeners.
+ * - Restaurada a lógica de negócio para criação de Contas a Pagar APENAS no recebimento da compra.
+ * - Garantida a funcionalidade dos modais "Nova Venda" e "Nova Compra".
+ * - Código de eventos centralizado e limpo.
  */
 
 // CONFIGURAÇÃO FIREBASE
@@ -38,13 +39,18 @@ const AppState = {
     currentSaleItems: [],
     currentOrderToConfirm: null,
     salesHistory: {},
-    stockItems: {},
+    purchases: {},
+    accountsReceivable: {},
+    accountsPayable: {},
     isAuthenticated: false
 };
 
 // UTILITÁRIOS
 const Utils = {
-    formatCurrency: (value) => `R$ ${parseFloat(value).toFixed(2).replace('.', ',')}`,
+    formatCurrency: (value) => {
+        if (isNaN(value)) value = 0;
+        return `R$ ${parseFloat(value).toFixed(2).replace('.', ',')}`;
+    },
     formatDate: (dateString) => new Date(dateString).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
     generateId: () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9),
     
@@ -78,51 +84,76 @@ const Utils = {
 
 // SELETORES DOM
 const DOM = {
+    // Navegação
     publicView: document.getElementById('public-view'),
     managementPanel: document.getElementById('management-panel'),
     authButton: document.getElementById('auth-button'),
+    
+    // Navegação superior
     navHome: document.getElementById('nav-home'),
     navShop: document.getElementById('nav-shop'),
     navCart: document.getElementById('nav-cart'),
     navDashboard: document.getElementById('nav-dashboard'),
     cartItemCount: document.getElementById('cart-item-count'),
+    
+    // Loja pública
     productList: document.getElementById('product-list'),
+    
+    // Carrinho
     cartModal: document.getElementById('cart-modal'),
     cartItems: document.getElementById('cart-items'),
     cartTotal: document.getElementById('cart-total'),
     checkoutButton: document.getElementById('checkout-button'),
     closeCartModal: document.getElementById('close-cart-modal'),
+    
+    // Checkout
     checkoutModal: document.getElementById('checkout-modal'),
     customerName: document.getElementById('customer-name'),
     customerWhatsapp: document.getElementById('customer-whatsapp'),
     submitCheckout: document.getElementById('submit-checkout'),
     closeCheckoutModal: document.getElementById('close-checkout-modal'),
+    
+    // Dashboard
     monthlyRevenue: document.getElementById('monthly-revenue'),
     dailySales: document.getElementById('daily-sales'),
     totalStock: document.getElementById('total-stock'),
     pendingReceivables: document.getElementById('pending-receivables'),
     lowStockAlerts: document.getElementById('low-stock-alerts'),
     resetSystemButton: document.getElementById('reset-system-button'),
+    
+    // Vendas
     pendingOrders: document.getElementById('pending-orders'),
     salesHistoryList: document.getElementById('sales-history-list'),
     newSaleButton: document.getElementById('new-sale-button'),
     salesHistoryFilterProduct: document.getElementById('sales-history-filter-product'),
     salesHistoryFilterIdentifier: document.getElementById('sales-history-filter-identifier'),
     applySalesHistoryFilter: document.getElementById('apply-sales-history-filter'),
+    
+    // Estoque
     productManagementList: document.getElementById('product-management-list'),
     addProductModelButton: document.getElementById('add-product-model-button'),
     stockFilterProduct: document.getElementById('stock-filter-product'),
     stockFilterIdentifier: document.getElementById('stock-filter-identifier'),
+    
+    // Compras
     purchaseList: document.getElementById('purchase-list'),
     newPurchaseButton: document.getElementById('new-purchase-button'),
+    
+    // Clientes
     customerList: document.getElementById('customer-list'),
     addCustomerButton: document.getElementById('add-customer-button'),
+    
+    // Fornecedores
     supplierList: document.getElementById('supplier-list'),
     addSupplierButton: document.getElementById('add-supplier-button'),
+    
+    // Financeiro
     cashBalance: document.getElementById('cash-balance'),
     accountsReceivable: document.getElementById('accounts-receivable'),
     accountsPayable: document.getElementById('accounts-payable'),
     newExpenseButton: document.getElementById('new-expense-button'),
+    
+    // Relatórios
     reportsFilterProduct: document.getElementById('reports-filter-product'),
     reportsFilterIdentifier: document.getElementById('reports-filter-identifier'),
     reportsFilterDateStart: document.getElementById('reports-filter-date-start'),
@@ -131,6 +162,8 @@ const DOM = {
     generateStockReport: document.getElementById('generate-stock-report'),
     generateFinancialReport: document.getElementById('generate-financial-report'),
     reportsOutput: document.getElementById('reports-output'),
+    
+    // Modais
     paymentConfirmationModal: document.getElementById('payment-confirmation-modal'),
     manualSaleModal: document.getElementById('manual-sale-modal'),
     customerFormModal: document.getElementById('customer-form-modal'),
@@ -139,6 +172,8 @@ const DOM = {
     purchaseFormModal: document.getElementById('purchase-form-modal'),
     expenseFormModal: document.getElementById('expense-form-modal'),
     detailsModal: document.getElementById('details-modal'),
+    
+    // Botões de fechar modais
     closePaymentConfirmationModal: document.getElementById('close-payment-confirmation-modal'),
     closeManualSaleModal: document.getElementById('close-manual-sale-modal'),
     closeCustomerFormModal: document.getElementById('close-customer-form-modal'),
@@ -391,14 +426,9 @@ const Stock = {
         }
         const filteredProducts = {};
         for (const [modelId, product] of Object.entries(AppState.products)) {
-            let matchProduct = false;
-            let matchIdentifier = false;
-            if (!productFilter || product.nome.toLowerCase().includes(productFilter)) {
-                matchProduct = true;
-            }
-            if (!identifierFilter) {
-                matchIdentifier = true;
-            } else if (product.unidades) {
+            let matchProduct = !productFilter || product.nome.toLowerCase().includes(productFilter);
+            let matchIdentifier = !identifierFilter;
+            if (identifierFilter && product.unidades) {
                 for (const identifier of Object.keys(product.unidades)) {
                     if (identifier.toLowerCase().includes(identifierFilter)) {
                         matchIdentifier = true;
@@ -421,10 +451,12 @@ const Stock = {
         const imageFile = document.getElementById('product-model-image-upload').files[0];
         const identifiers = document.getElementById('product-model-identifiers').value.trim();
         const unitCost = parseFloat(document.getElementById('product-model-unit-cost').value) || 0;
+
         if (!Utils.validateForm([document.getElementById('product-model-name'), document.getElementById('product-model-price')])) {
             Utils.showNotification('Por favor, preencha todos os campos obrigatórios.', 'error');
             return;
         }
+
         try {
             let imageUrl = (id && AppState.products[id] && AppState.products[id].imagem) || '';
             if (imageFile) {
@@ -439,6 +471,7 @@ const Stock = {
                     throw new Error('Erro no upload da imagem');
                 }
             }
+
             const productData = {
                 nome: name,
                 nome_lowercase: name.toLowerCase(),
@@ -446,23 +479,28 @@ const Stock = {
                 descricao: description,
                 nivelAlertaEstoque: alertLevel,
                 imagem: imageUrl,
-                dataAtualizacao: new Date().toISOString()
+                dataAtualizacao: new Date().toISOString(),
+                unidades: (id && AppState.products[id] && AppState.products[id].unidades) || {}
             };
+
+            const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
+            const modelId = id || dbRef.key;
+
+            await dbRef.update(productData);
+
             if (identifiers && unitCost > 0) {
                 const identifierList = identifiers.split('\n').map(id => id.trim()).filter(id => id.length > 0);
-                if (identifierList.length > 0) {
-                    productData.unidades = {};
-                    for (const identifier of identifierList) {
-                        productData.unidades[identifier] = {
-                            status: 'disponivel',
-                            dataEntrada: new Date().toISOString(),
-                            custoCompra: unitCost
-                        };
-                    }
+                const updates = {};
+                for (const identifier of identifierList) {
+                    updates[`/produtos/${modelId}/unidades/${identifier}`] = {
+                        status: 'disponivel',
+                        dataEntrada: new Date().toISOString(),
+                        custoCompra: unitCost
+                    };
                 }
+                await database.ref().update(updates);
             }
-            const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
-            await dbRef.set(productData);
+
             Utils.showNotification(`Produto ${id ? 'atualizado' : 'criado'} com sucesso!`, 'success');
             UI.toggleModal(DOM.productModelFormModal, false);
         } catch (error) {
@@ -526,10 +564,7 @@ const Stock = {
                     <div class="bg-gray-700 p-3 rounded"><div class="text-2xl font-bold text-red-400">${Object.values(units).filter(u => u.status === 'vendido').length}</div><div class="text-sm text-gray-400">Vendido</div></div>
                     <div class="bg-gray-700 p-3 rounded"><div class="text-2xl font-bold text-cyan-400">${Object.keys(units).length}</div><div class="text-sm text-gray-400">Total</div></div>
                 </div>
-                <div>
-                    <h5 class="font-semibold mb-2">Identificadores em Estoque:</h5>
-                    <div class="space-y-1 max-h-40 overflow-y-auto">${unitsList || '<p class="text-gray-400 text-center">Nenhuma unidade em estoque</p>'}</div>
-                </div>
+                <div><h5 class="font-semibold mb-2">Identificadores em Estoque:</h5><div class="space-y-1 max-h-40 overflow-y-auto">${unitsList || '<p class="text-gray-400 text-center">Nenhuma unidade em estoque</p>'}</div></div>
                 <div class="text-xs text-gray-400"><p>Nível de alerta: ${product.nivelAlertaEstoque || 0} unidades</p><p>Última atualização: ${product.dataAtualizacao ? Utils.formatDate(product.dataAtualizacao) : 'N/A'}</p></div>
             </div>`;
         UI.showDetailsModal(`Detalhes: ${product.nome}`, content);
@@ -771,9 +806,19 @@ const Sales = {
         const productOptions = Object.entries(AppState.products).map(([id, product]) => `<option value="${id}">${product.nome}</option>`).join('');
         productSelect.innerHTML = '<option value="">Selecione o Modelo</option>' + productOptions;
         document.getElementById('sale-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('sale-payment-method').value = 'Pix';
+        document.getElementById('sale-installments').value = 1;
+        document.getElementById('sale-first-due-date').value = new Date().toISOString().split('T')[0];
+        this.toggleManualSaleInstallmentFields();
         AppState.currentSaleItems = [];
         this.updateSaleItemsList();
         UI.toggleModal(DOM.manualSaleModal, true);
+    },
+    toggleManualSaleInstallmentFields() {
+        const method = document.getElementById('sale-payment-method').value;
+        const installmentFields = document.getElementById('sale-installment-fields');
+        const show = ['Boleto', 'Cartão de Crédito', 'Carteira Digital'].includes(method);
+        installmentFields.classList.toggle('hidden', !show);
     },
     populateSaleIdentifiers() {
         const modelId = document.getElementById('sale-product-model').value;
@@ -933,12 +978,12 @@ const Sales = {
 const Purchases = {
     loadPurchases() {
         database.ref('compras').on('value', snapshot => {
-            const purchases = snapshot.val() || {};
-            this.renderPurchases(purchases);
+            AppState.purchases = snapshot.val() || {};
+            this.renderPurchases(AppState.purchases);
         });
     },
     renderPurchases(purchases) {
-        const purchaseEntries = Object.entries(purchases);
+        const purchaseEntries = Object.entries(purchases).reverse();
         if (purchaseEntries.length === 0) {
             DOM.purchaseList.innerHTML = '<p class="empty-state">Nenhuma compra registrada.</p>';
             return;
@@ -952,7 +997,7 @@ const Purchases = {
                     <td>${purchase.fornecedorNome}</td>
                     <td class="text-center">${itemsCount}</td>
                     <td class="font-semibold">${Utils.formatCurrency(purchase.total)}</td>
-                    <td>${purchase.formaPagamento}</td>
+                    <td>${purchase.pagamento.metodo}</td>
                     <td><span class="status-badge ${purchase.status === 'Recebido' ? 'status-concluida' : 'status-pendente'}">${purchase.status}</span></td>
                     <td><div class="flex gap-1">${purchase.status === 'Aguardando Recebimento' ? `<button class="confirm-receipt-button bg-green-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Receber</button>` : ''}<button class="delete-purchase-button bg-red-600 text-white text-xs px-2 py-1 rounded" data-id="${id}">Excluir</button></div></td>
                 </tr>`;
@@ -1148,27 +1193,25 @@ const Purchases = {
         }
     },
     showPurchaseDetails(purchaseId) {
-        database.ref('compras/' + purchaseId).once('value', snapshot => {
-            const purchase = snapshot.val();
-            if (!purchase) return;
-            const itemsList = purchase.itens.map(item => `<div class="p-2 bg-gray-700 rounded mb-2"><div class="font-semibold">${item.nome}</div><div class="text-sm text-gray-400">${item.identifiers.length} unidade(s) × ${Utils.formatCurrency(item.unitPrice)} = ${Utils.formatCurrency(item.identifiers.length * item.unitPrice)}</div><div class="text-xs text-gray-400">S/N: ${item.identifiers.join(', ')}</div></div>`).join('');
-            const content = `
-                <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div><div class="font-semibold">Fornecedor</div><div class="text-gray-400">${purchase.fornecedorNome}</div></div>
-                        <div><div class="font-semibold">Nota Fiscal</div><div class="text-gray-400">#${purchase.numeroNota}</div></div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div><div class="font-semibold">Data da Compra</div><div class="text-gray-400">${Utils.formatDate(purchase.dataCompra)}</div></div>
-                        <div><div class="font-semibold">Forma de Pagamento</div><div class="text-gray-400">${purchase.formaPagamento} ${purchase.parcelas ? `(${purchase.parcelas}x)` : ''}</div></div>
-                    </div>
-                    <div><div class="font-semibold">Status</div><span class="status-badge ${purchase.status === 'Recebido' ? 'status-concluida' : 'status-pendente'}">${purchase.status}</span></div>
-                    <div><div class="font-semibold mb-2">Itens Comprados</div><div class="space-y-2">${itemsList}</div></div>
-                    <div class="bg-cyan-800 p-3 rounded text-center"><div class="text-lg font-bold">Total: ${Utils.formatCurrency(purchase.total)}</div></div>
-                    ${purchase.status === 'Aguardando Recebimento' ? `<div class="flex gap-2"><button class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded confirm-receipt-button" data-id="${purchaseId}">Confirmar Recebimento</button></div>` : ''}
-                </div>`;
-            UI.showDetailsModal(`Compra NF #${purchase.numeroNota}`, content);
-        });
+        const purchase = AppState.purchases[purchaseId];
+        if (!purchase) return;
+        const itemsList = purchase.itens.map(item => `<div class="p-2 bg-gray-700 rounded mb-2"><div class="font-semibold">${item.nome}</div><div class="text-sm text-gray-400">${item.identifiers.length} unidade(s) × ${Utils.formatCurrency(item.unitPrice)} = ${Utils.formatCurrency(item.identifiers.length * item.unitPrice)}</div><div class="text-xs text-gray-400">S/N: ${item.identifiers.join(', ')}</div></div>`).join('');
+        const content = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div><div class="font-semibold">Fornecedor</div><div class="text-gray-400">${purchase.fornecedorNome}</div></div>
+                    <div><div class="font-semibold">Nota Fiscal</div><div class="text-gray-400">#${purchase.numeroNota}</div></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><div class="font-semibold">Data da Compra</div><div class="text-gray-400">${Utils.formatDate(purchase.dataCompra)}</div></div>
+                    <div><div class="font-semibold">Forma de Pagamento</div><div class="text-gray-400">${purchase.pagamento.metodo} ${purchase.pagamento.parcelas ? `(${purchase.pagamento.parcelas}x)` : ''}</div></div>
+                </div>
+                <div><div class="font-semibold">Status</div><span class="status-badge ${purchase.status === 'Recebido' ? 'status-concluida' : 'status-pendente'}">${purchase.status}</span></div>
+                <div><div class="font-semibold mb-2">Itens Comprados</div><div class="space-y-2">${itemsList}</div></div>
+                <div class="bg-cyan-800 p-3 rounded text-center"><div class="text-lg font-bold">Total: ${Utils.formatCurrency(purchase.total)}</div></div>
+                ${purchase.status === 'Aguardando Recebimento' ? `<div class="flex gap-2"><button class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded confirm-receipt-button" data-id="${purchaseId}">Confirmar Recebimento</button></div>` : ''}
+            </div>`;
+        UI.showDetailsModal(`Compra NF #${purchase.numeroNota}`, content);
     }
 };
 
@@ -1396,14 +1439,14 @@ const Finance = {
     },
     loadAccountsReceivable() {
         database.ref('contasReceber').orderByChild('dataVencimento').on('value', snapshot => {
-            const accounts = snapshot.val() || {};
-            this.renderAccountsReceivable(accounts);
+            AppState.accountsReceivable = snapshot.val() || {};
+            this.renderAccountsReceivable(AppState.accountsReceivable);
         });
     },
     loadAccountsPayable() {
         database.ref('contasPagar').orderByChild('dataVencimento').on('value', snapshot => {
-            const accounts = snapshot.val() || {};
-            this.renderAccountsPayable(accounts);
+            AppState.accountsPayable = snapshot.val() || {};
+            this.renderAccountsPayable(AppState.accountsPayable);
         });
     },
     renderAccountsReceivable(accounts) {
@@ -1774,20 +1817,8 @@ const Reports = {
                         <h4 class="text-lg font-semibold mb-3">Análise de Fluxo de Caixa</h4>
                         <div class="bg-gray-700 p-4 rounded">
                             <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <h5 class="font-semibold text-green-400 mb-2">Entradas</h5>
-                                    <div class="text-sm space-y-1">
-                                        <div class="flex justify-between"><span>Vendas Realizadas:</span><span>${Utils.formatCurrency(totalSalesRevenue)}</span></div>
-                                        <div class="flex justify-between"><span>Recebimentos:</span><span>${Utils.formatCurrency(totalReceived)}</span></div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <h5 class="font-semibold text-red-400 mb-2">Saídas</h5>
-                                    <div class="text-sm space-y-1">
-                                        <div class="flex justify-between"><span>Pagamentos:</span><span>${Utils.formatCurrency(totalPaid)}</span></div>
-                                        <div class="flex justify-between"><span>Pendências:</span><span>${Utils.formatCurrency(pendingPayable)}</span></div>
-                                    </div>
-                                </div>
+                                <div><h5 class="font-semibold text-green-400 mb-2">Entradas</h5><div class="text-sm space-y-1"><div class="flex justify-between"><span>Vendas Realizadas:</span><span>${Utils.formatCurrency(totalSalesRevenue)}</span></div><div class="flex justify-between"><span>Recebimentos:</span><span>${Utils.formatCurrency(totalReceived)}</span></div></div></div>
+                                <div><h5 class="font-semibold text-red-400 mb-2">Saídas</h5><div class="text-sm space-y-1"><div class="flex justify-between"><span>Pagamentos:</span><span>${Utils.formatCurrency(totalPaid)}</span></div><div class="flex justify-between"><span>Pendências:</span><span>${Utils.formatCurrency(pendingPayable)}</span></div></div></div>
                             </div>
                         </div>
                     </div>
@@ -1830,23 +1861,27 @@ const SystemReset = {
 
 const EventListeners = {
     init() {
-        DOM.authButton.addEventListener('click', Auth.handleAuthClick);
+        // Navegação
+        DOM.authButton.addEventListener('click', () => Auth.handleAuthClick());
         DOM.navHome.addEventListener('click', () => UI.switchView('public'));
         DOM.navShop.addEventListener('click', () => UI.switchView('public'));
         DOM.navCart.addEventListener('click', () => UI.toggleModal(DOM.cartModal, true));
+
+        // Tabs
         document.querySelectorAll('.tab-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const tabId = button.getAttribute('data-tab');
-                UI.switchTab(tabId);
-            });
+            button.addEventListener('click', () => UI.switchTab(button.getAttribute('data-tab')));
         });
+
+        // Carrinho e Checkout
         DOM.closeCartModal.addEventListener('click', () => UI.toggleModal(DOM.cartModal, false));
         DOM.checkoutButton.addEventListener('click', () => {
             UI.toggleModal(DOM.cartModal, false);
             UI.toggleModal(DOM.checkoutModal, true);
         });
         DOM.closeCheckoutModal.addEventListener('click', () => UI.toggleModal(DOM.checkoutModal, false));
-        DOM.submitCheckout.addEventListener('click', Cart.submitCheckout);
+        DOM.submitCheckout.addEventListener('click', () => Cart.submitCheckout());
+
+        // Modais - Botões de fechar
         DOM.closePaymentConfirmationModal.addEventListener('click', () => UI.toggleModal(DOM.paymentConfirmationModal, false));
         DOM.closeManualSaleModal.addEventListener('click', () => UI.toggleModal(DOM.manualSaleModal, false));
         DOM.closeCustomerFormModal.addEventListener('click', () => UI.toggleModal(DOM.customerFormModal, false));
@@ -1855,132 +1890,89 @@ const EventListeners = {
         DOM.closePurchaseFormModal.addEventListener('click', () => UI.toggleModal(DOM.purchaseFormModal, false));
         DOM.closeExpenseFormModal.addEventListener('click', () => UI.toggleModal(DOM.expenseFormModal, false));
         DOM.closeDetailsModal.addEventListener('click', () => UI.toggleModal(DOM.detailsModal, false));
-        DOM.resetSystemButton.addEventListener('click', SystemReset.resetSystem);
-        DOM.newSaleButton.addEventListener('click', Sales.openNewSaleModal);
-        DOM.applySalesHistoryFilter.addEventListener('click', Sales.applySalesHistoryFilter);
-        DOM.addProductModelButton.addEventListener('click', Stock.openNewProductModelModal);
-        DOM.stockFilterProduct.addEventListener('input', Stock.applyFilters);
-        DOM.stockFilterIdentifier.addEventListener('input', Stock.applyFilters);
-        DOM.newPurchaseButton.addEventListener('click', Purchases.openNewPurchaseModal);
-        DOM.addCustomerButton.addEventListener('click', Customers.openNewCustomerModal);
-        DOM.addSupplierButton.addEventListener('click', Suppliers.openNewSupplierModal);
-        DOM.newExpenseButton.addEventListener('click', Finance.openNewExpenseModal);
-        DOM.generateSalesReport.addEventListener('click', Reports.generateSalesReport);
-        DOM.generateStockReport.addEventListener('click', Reports.generateStockReport);
-        DOM.generateFinancialReport.addEventListener('click', Reports.generateFinancialReport);
-        document.getElementById('save-customer-button').addEventListener('click', Customers.saveCustomer);
-        document.getElementById('save-product-model-button').addEventListener('click', Stock.saveProductModel);
-        document.getElementById('save-supplier-button').addEventListener('click', Suppliers.saveSupplier);
-        document.getElementById('save-purchase-button').addEventListener('click', Purchases.savePurchase);
-        document.getElementById('save-expense-button').addEventListener('click', Finance.saveExpense);
-        document.getElementById('save-manual-sale-button').addEventListener('click', Sales.saveManualSale);
-        document.getElementById('confirm-sale-payment-method').addEventListener('change', Sales.toggleInstallmentFields);
-        document.getElementById('process-sale-confirmation-button').addEventListener('click', Sales.processSaleConfirmation);
-        document.getElementById('sale-product-model').addEventListener('change', Sales.populateSaleIdentifiers);
-        document.getElementById('add-item-to-sale-button').addEventListener('click', Sales.addItemToSale);
-        document.getElementById('sale-payment-method').addEventListener('change', Sales.toggleManualSaleInstallmentFields);
-        document.getElementById('purchase-payment-method').addEventListener('change', Purchases.togglePaymentDetails);
-        document.getElementById('add-item-to-purchase-button').addEventListener('click', Purchases.addItemToPurchase);
+
+        // Ações do Painel
+        DOM.resetSystemButton.addEventListener('click', () => SystemReset.resetSystem());
+        DOM.newSaleButton.addEventListener('click', () => Sales.openNewSaleModal());
+        DOM.applySalesHistoryFilter.addEventListener('click', () => Sales.applySalesHistoryFilter());
+        DOM.addProductModelButton.addEventListener('click', () => Stock.openNewProductModelModal());
+        DOM.stockFilterProduct.addEventListener('input', () => Stock.applyFilters());
+        DOM.stockFilterIdentifier.addEventListener('input', () => Stock.applyFilters());
+        DOM.newPurchaseButton.addEventListener('click', () => Purchases.openNewPurchaseModal());
+        DOM.addCustomerButton.addEventListener('click', () => Customers.openNewCustomerModal());
+        DOM.addSupplierButton.addEventListener('click', () => Suppliers.openNewSupplierModal());
+        DOM.newExpenseButton.addEventListener('click', () => Finance.openNewExpenseModal());
+
+        // Relatórios
+        DOM.generateSalesReport.addEventListener('click', () => Reports.generateSalesReport());
+        DOM.generateStockReport.addEventListener('click', () => Reports.generateStockReport());
+        DOM.generateFinancialReport.addEventListener('click', () => Reports.generateFinancialReport());
+
+        // Formulários - Botões de salvar
+        document.getElementById('save-customer-button').addEventListener('click', () => Customers.saveCustomer());
+        document.getElementById('save-product-model-button').addEventListener('click', () => Stock.saveProductModel());
+        document.getElementById('save-supplier-button').addEventListener('click', () => Suppliers.saveSupplier());
+        document.getElementById('save-purchase-button').addEventListener('click', () => Purchases.savePurchase());
+        document.getElementById('save-expense-button').addEventListener('click', () => Finance.saveExpense());
+        document.getElementById('save-manual-sale-button').addEventListener('click', () => Sales.saveManualSale());
+
+        // Eventos de 'change' e botões específicos de modais
+        document.getElementById('confirm-sale-payment-method').addEventListener('change', () => Sales.toggleInstallmentFields());
+        document.getElementById('process-sale-confirmation-button').addEventListener('click', () => Sales.processSaleConfirmation());
+        document.getElementById('sale-product-model').addEventListener('change', () => Sales.populateSaleIdentifiers());
+        document.getElementById('add-item-to-sale-button').addEventListener('click', () => Sales.addItemToSale());
+        document.getElementById('sale-payment-method').addEventListener('change', () => Sales.toggleManualSaleInstallmentFields());
+        document.getElementById('purchase-payment-method').addEventListener('change', () => Purchases.togglePaymentDetails());
+        document.getElementById('add-item-to-purchase-button').addEventListener('click', () => Purchases.addItemToPurchase());
+        
+        // Event delegation para botões e elementos dinâmicos
         document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('add-to-cart-button')) {
-                const productId = e.target.getAttribute('data-id');
-                Cart.addToCart(productId);
+            const target = e.target.closest('button, .clickable-row');
+            if (!target) return;
+
+            const button = e.target.closest('button');
+            if (button) {
+                if (button.classList.contains('add-to-cart-button')) Cart.addToCart(button.dataset.id);
+                if (button.classList.contains('remove-from-cart-button')) Cart.removeFromCart(button.dataset.id);
+                if (button.classList.contains('confirm-sale-button')) Sales.openPaymentConfirmationModal(button.dataset.id);
+                if (button.classList.contains('cancel-order-button')) Sales.cancelOrder(button.dataset.id);
+                if (button.classList.contains('remove-sale-item-button')) Sales.removeItemFromSale(parseInt(button.dataset.index));
+                if (button.classList.contains('edit-product-model-button')) Stock.openEditProductModelModal(button.dataset.id);
+                if (button.classList.contains('delete-product-model-button')) Stock.deleteProductModel(button.dataset.id);
+                if (button.classList.contains('confirm-receipt-button')) Purchases.confirmPurchaseReceipt(button.dataset.id);
+                if (button.classList.contains('delete-purchase-button')) Purchases.deletePurchase(button.dataset.id);
+                if (button.classList.contains('remove-purchase-item-button')) Purchases.removeItemFromPurchase(parseInt(button.dataset.index));
+                if (button.classList.contains('edit-customer-button')) Customers.openEditCustomerModal(button.dataset.id);
+                if (button.classList.contains('delete-customer-button')) Customers.deleteCustomer(button.dataset.id);
+                if (button.classList.contains('edit-supplier-button')) Suppliers.openEditSupplierModal(button.dataset.id);
+                if (button.classList.contains('delete-supplier-button')) Suppliers.deleteSupplier(button.dataset.id);
+                if (button.classList.contains('confirm-transaction-button')) Finance.confirmTransaction(button.dataset.id, button.dataset.type);
             }
-            if (e.target.classList.contains('remove-from-cart-button')) {
-                const productId = e.target.getAttribute('data-id');
-                Cart.removeFromCart(productId);
-            }
-            if (e.target.classList.contains('confirm-sale-button')) {
-                const orderId = e.target.getAttribute('data-id');
-                Sales.openPaymentConfirmationModal(orderId);
-            }
-            if (e.target.classList.contains('cancel-order-button')) {
-                const orderId = e.target.getAttribute('data-id');
-                Sales.cancelOrder(orderId);
-            }
-            if (e.target.classList.contains('remove-sale-item-button')) {
-                const index = parseInt(e.target.getAttribute('data-index'));
-                Sales.removeItemFromSale(index);
-            }
-            if (e.target.classList.contains('edit-product-model-button')) {
-                const modelId = e.target.getAttribute('data-id');
-                Stock.openEditProductModelModal(modelId);
-            }
-            if (e.target.classList.contains('delete-product-model-button')) {
-                const modelId = e.target.getAttribute('data-id');
-                Stock.deleteProductModel(modelId);
-            }
-            if (e.target.classList.contains('confirm-receipt-button')) {
-                const purchaseId = e.target.getAttribute('data-id');
-                Purchases.confirmPurchaseReceipt(purchaseId);
-            }
-            if (e.target.classList.contains('delete-purchase-button')) {
-                const purchaseId = e.target.getAttribute('data-id');
-                Purchases.deletePurchase(purchaseId);
-            }
-            if (e.target.classList.contains('remove-purchase-item-button')) {
-                const index = parseInt(e.target.getAttribute('data-index'));
-                Purchases.removeItemFromPurchase(index);
-            }
-            if (e.target.classList.contains('edit-customer-button')) {
-                const customerId = e.target.getAttribute('data-id');
-                Customers.openEditCustomerModal(customerId);
-            }
-            if (e.target.classList.contains('delete-customer-button')) {
-                const customerId = e.target.getAttribute('data-id');
-                Customers.deleteCustomer(customerId);
-            }
-            if (e.target.classList.contains('edit-supplier-button')) {
-                const supplierId = e.target.getAttribute('data-id');
-                Suppliers.openEditSupplierModal(supplierId);
-            }
-            if (e.target.classList.contains('delete-supplier-button')) {
-                const supplierId = e.target.getAttribute('data-id');
-                Suppliers.deleteSupplier(supplierId);
-            }
-            if (e.target.classList.contains('confirm-transaction-button')) {
-                const accountId = e.target.getAttribute('data-id');
-                const type = e.target.getAttribute('data-type');
-                Finance.confirmTransaction(accountId, type);
-            }
-            if (e.target.closest('.clickable-row')) {
-                const row = e.target.closest('.clickable-row');
-                const type = row.getAttribute('data-type');
-                const id = row.getAttribute('data-id');
-                if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
-                    return;
-                }
+
+            const row = e.target.closest('.clickable-row');
+            if (row && !(e.target.tagName === 'BUTTON' || e.target.closest('button'))) {
+                const { type, id } = row.dataset;
                 switch (type) {
-                    case 'product':
-                        Stock.showProductDetails(id);
-                        break;
-                    case 'sale':
-                        Sales.showSaleDetails(id);
-                        break;
-                    case 'order':
-                        Sales.showOrderDetails(id);
-                        break;
-                    case 'purchase':
-                        Purchases.showPurchaseDetails(id);
-                        break;
-                    case 'customer':
-                        Customers.showCustomerDetails(id);
-                        break;
-                    case 'supplier':
-                        Suppliers.showSupplierDetails(id);
-                        break;
-                    case 'receivable':
-                        Finance.showAccountDetails(id, 'receivable');
-                        break;
-                    case 'payable':
-                        Finance.showAccountDetails(id, 'payable');
-                        break;
+                    case 'product': Stock.showProductDetails(id); break;
+                    case 'sale': Sales.showSaleDetails(id); break;
+                    case 'order': Sales.showOrderDetails(id); break;
+                    case 'purchase': Purchases.showPurchaseDetails(id); break;
+                    case 'customer': Customers.showCustomerDetails(id); break;
+                    case 'supplier': Suppliers.showSupplierDetails(id); break;
+                    case 'receivable': Finance.showAccountDetails(id, 'receivable'); break;
+                    case 'payable': Finance.showAccountDetails(id, 'payable'); break;
                 }
             }
+        });
+
+        // Event delegation para inputs dinâmicos
+        document.addEventListener('input', (e) => {
             if (e.target.classList.contains('confirm-item-price')) {
                 Sales.updateConfirmationTotal();
             }
         });
+
+        // Fechar modais
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal-backdrop')) {
                 e.target.classList.add('hidden');
@@ -2000,9 +1992,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Auth.init();
     EventListeners.init();
     Shop.loadPublicProducts();
-    DOM.stockFilterProduct.addEventListener('input', Stock.applyFilters);
-    DOM.stockFilterIdentifier.addEventListener('input', Stock.applyFilters);
-    console.log('Techmess ERP v4.1 - Sistema Profissional de Gestão inicializado com sucesso!');
+    console.log('Techmess ERP v4.2 - Sistema Profissional de Gestão inicializado com sucesso!');
 });
 
 window.TechmessERP = {
