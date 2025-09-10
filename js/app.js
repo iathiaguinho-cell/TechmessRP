@@ -1,13 +1,14 @@
 /**
  * Techmess ERP - Sistema Profissional de Gestão
- * Versão 5.1 - Build Estável
- * * Novas Funcionalidades:
+ * Versão 5.2 - Build Estável
+ * * Correções de Bugs e Melhorias de Fluxo:
+ * - O modal "Novo Modelo" agora serve apenas para cadastrar o modelo, sem adicionar estoque, corrigindo o bug da "unidade fantasma".
+ * - Adicionado botão e modal "Adicionar Estoque" para correção manual de inventário.
+ * - Corrigida a lógica para que o Dashboard seja atualizado após ações críticas (ex: recebimento de compra, ajuste de estoque).
+ * - Robustecida a geração de relatórios para evitar falhas silenciosas e informar o usuário quando não há dados.
+ * * Funcionalidades Anteriores Mantidas:
  * - Cálculo e armazenamento do lucro em cada venda.
  * - Exibição do lucro nos detalhes da venda e nos relatórios de vendas.
- * * Correções de Bugs:
- * - Corrigido bug que criava "unidade fantasma" no estoque ao cadastrar um novo modelo de produto.
- * - Corrigida a lógica para que o Dashboard seja atualizado após ações críticas (ex: recebimento de compra).
- * - Robustecida a geração de relatórios para evitar falhas silenciosas.
  * - Adicionado event listener ao botão "Dashboard" da navegação.
  * - Corrigido o problema de contexto (`this`) em todos os event listeners.
  * - Restaurada a lógica de negócio para criação de Contas a Pagar APENAS no recebimento da compra.
@@ -177,6 +178,7 @@ const DOM = {
     purchaseFormModal: document.getElementById('purchase-form-modal'),
     expenseFormModal: document.getElementById('expense-form-modal'),
     detailsModal: document.getElementById('details-modal'),
+    addStockModal: document.getElementById('add-stock-modal'),
     
     // Botões de fechar modais
     closePaymentConfirmationModal: document.getElementById('close-payment-confirmation-modal'),
@@ -186,7 +188,8 @@ const DOM = {
     closeSupplierFormModal: document.getElementById('close-supplier-form-modal'),
     closePurchaseFormModal: document.getElementById('close-purchase-form-modal'),
     closeExpenseFormModal: document.getElementById('close-expense-form-modal'),
-    closeDetailsModal: document.getElementById('close-details-modal')
+    closeDetailsModal: document.getElementById('close-details-modal'),
+    closeAddStockModal: document.getElementById('close-add-stock-modal')
 };
 
 const UI = {
@@ -414,7 +417,13 @@ const Stock = {
                     <td><div class="text-center"><div class="text-lg font-bold text-red-400">${soldCount}</div><div class="text-xs text-gray-400">Vendido</div></div></td>
                     <td><div class="text-center"><div class="text-lg font-bold">${totalCount}</div><div class="text-xs text-gray-400">Total</div></div></td>
                     <td><div class="flex flex-wrap gap-1 max-w-xs">${unitsList || '<span class="text-gray-400 text-xs">Nenhuma unidade</span>'}</div></td>
-                    <td><div class="flex gap-1"><button class="edit-product-model-button bg-blue-600 text-white text-xs px-2 py-1 rounded" data-id="${modelId}">Editar</button><button class="delete-product-model-button bg-red-600 text-white text-xs px-2 py-1 rounded" data-id="${modelId}">Excluir</button></div></td>
+                    <td>
+                        <div class="flex gap-1">
+                            <button class="add-stock-button bg-green-600 text-white text-xs px-2 py-1 rounded" data-id="${modelId}">Adicionar</button>
+                            <button class="edit-product-model-button bg-blue-600 text-white text-xs px-2 py-1 rounded" data-id="${modelId}">Editar</button>
+                            <button class="delete-product-model-button bg-red-600 text-white text-xs px-2 py-1 rounded" data-id="${modelId}">Excluir</button>
+                        </div>
+                    </td>
                 </tr>`;
         }).join('');
         DOM.productManagementList.innerHTML = `
@@ -455,19 +464,9 @@ const Stock = {
         const description = document.getElementById('product-model-description').value.trim();
         const alertLevel = parseInt(document.getElementById('product-model-alert-level').value) || 0;
         const imageFile = document.getElementById('product-model-image-upload').files[0];
-        const identifiers = document.getElementById('product-model-identifiers').value.trim();
-        const unitCostField = document.getElementById('product-model-unit-cost');
-        const unitCost = parseFloat(unitCostField.value) || 0;
 
         if (!Utils.validateForm([document.getElementById('product-model-name'), document.getElementById('product-model-price')])) {
             Utils.showNotification('Por favor, preencha nome e preço.', 'error');
-            return;
-        }
-
-        // *** CORREÇÃO APLICADA AQUI ***
-        if (identifiers && (!unitCost || unitCost <= 0)) {
-            Utils.showNotification('Para adicionar unidades, o custo deve ser maior que zero.', 'error');
-            Utils.validateForm([unitCostField]);
             return;
         }
 
@@ -487,8 +486,7 @@ const Stock = {
             }
 
             const dbRef = id ? database.ref('produtos/' + id) : database.ref('produtos').push();
-            const modelId = id || dbRef.key;
-
+            
             const productData = {
                 nome: name,
                 nome_lowercase: name.toLowerCase(),
@@ -500,23 +498,10 @@ const Stock = {
             };
             
             if (!id) {
-                productData.unidades = {}; // Garante que o nó unidades exista para novos produtos
+                productData.unidades = {}; 
             }
 
             await dbRef.update(productData);
-
-            if (identifiers && unitCost > 0) {
-                const identifierList = identifiers.split('\n').map(id => id.trim()).filter(id => id.length > 0);
-                const updates = {};
-                for (const identifier of identifierList) {
-                    updates[`/produtos/${modelId}/unidades/${identifier}`] = {
-                        status: 'disponivel',
-                        dataEntrada: new Date().toISOString(),
-                        custoCompra: unitCost
-                    };
-                }
-                await database.ref().update(updates);
-            }
 
             Utils.showNotification(`Produto ${id ? 'atualizado' : 'criado'} com sucesso!`, 'success');
             UI.toggleModal(DOM.productModelFormModal, false);
@@ -533,8 +518,6 @@ const Stock = {
         document.getElementById('product-model-description').value = '';
         document.getElementById('product-model-alert-level').value = '';
         document.getElementById('product-model-image-upload').value = '';
-        document.getElementById('product-model-identifiers').value = '';
-        document.getElementById('product-model-unit-cost').value = '';
         UI.toggleModal(DOM.productModelFormModal, true);
     },
     openEditProductModelModal(modelId) {
@@ -547,9 +530,47 @@ const Stock = {
         document.getElementById('product-model-description').value = product.descricao || '';
         document.getElementById('product-model-alert-level').value = product.nivelAlertaEstoque || '';
         document.getElementById('product-model-image-upload').value = '';
-        document.getElementById('product-model-identifiers').value = '';
-        document.getElementById('product-model-unit-cost').value = '';
         UI.toggleModal(DOM.productModelFormModal, true);
+    },
+    openAddStockModal(modelId) {
+        const product = AppState.products[modelId];
+        if (!product) return;
+        document.getElementById('add-stock-modal-title').textContent = `Adicionar Estoque para: ${product.nome}`;
+        document.getElementById('add-stock-model-id').value = modelId;
+        document.getElementById('add-stock-identifiers').value = '';
+        document.getElementById('add-stock-unit-cost').value = '';
+        UI.toggleModal(DOM.addStockModal, true);
+    },
+    async saveStockUnits() {
+        const modelId = document.getElementById('add-stock-model-id').value;
+        const identifiers = document.getElementById('add-stock-identifiers').value.trim();
+        const unitCostField = document.getElementById('add-stock-unit-cost');
+        const unitCost = parseFloat(unitCostField.value) || 0;
+
+        if (!identifiers || !unitCost || unitCost <= 0) {
+            Utils.showNotification('É necessário preencher os identificadores e um custo válido maior que zero.', 'error');
+            Utils.validateForm([document.getElementById('add-stock-identifiers'), unitCostField]);
+            return;
+        }
+
+        try {
+            const identifierList = identifiers.split('\n').map(id => id.trim()).filter(id => id.length > 0);
+            const updates = {};
+            for (const identifier of identifierList) {
+                updates[`/produtos/${modelId}/unidades/${identifier}`] = {
+                    status: 'disponivel',
+                    dataEntrada: new Date().toISOString(),
+                    custoCompra: unitCost,
+                    origem: 'Ajuste Manual'
+                };
+            }
+            await database.ref().update(updates);
+            Utils.showNotification('Estoque adicionado com sucesso!', 'success');
+            UI.toggleModal(DOM.addStockModal, false);
+        } catch (error) {
+            console.error("Erro ao adicionar estoque:", error);
+            Utils.showNotification('Erro ao adicionar estoque: ' + error.message, 'error');
+        }
     },
     async deleteProductModel(modelId) {
         const product = AppState.products[modelId];
@@ -1223,7 +1244,7 @@ const Purchases = {
             }
             await purchaseRef.update({ status: 'Recebido', dataRecebimento: new Date().toISOString() });
             Utils.showNotification('Recebimento confirmado! Estoque atualizado e contas a pagar geradas!', 'success');
-            Dashboard.updateDashboard(); // *** CORREÇÃO: Atualiza o dashboard após a mudança no estoque.
+            Dashboard.updateDashboard(); 
         } catch (error) {
             console.error("Erro ao confirmar recebimento:", error);
             Utils.showNotification('Erro ao confirmar recebimento: ' + error.message, 'error');
@@ -1652,7 +1673,7 @@ const Dashboard = {
         this.calculateDailySalesAndMonthlyRevenue();
         this.updateStockCount();
         this.checkLowStockAlerts();
-        Finance.calculateCashBalance(); // Garante que o saldo do financeiro seja atualizado
+        Finance.calculateCashBalance(); 
     },
     async calculateDailySalesAndMonthlyRevenue() {
         try {
@@ -1945,6 +1966,7 @@ const EventListeners = {
         DOM.closePurchaseFormModal.addEventListener('click', () => UI.toggleModal(DOM.purchaseFormModal, false));
         DOM.closeExpenseFormModal.addEventListener('click', () => UI.toggleModal(DOM.expenseFormModal, false));
         DOM.closeDetailsModal.addEventListener('click', () => UI.toggleModal(DOM.detailsModal, false));
+        DOM.closeAddStockModal.addEventListener('click', () => UI.toggleModal(DOM.addStockModal, false));
 
         // Ações do Painel
         DOM.resetSystemButton.addEventListener('click', () => SystemReset.resetSystem());
@@ -1970,6 +1992,7 @@ const EventListeners = {
         document.getElementById('save-purchase-button').addEventListener('click', () => Purchases.savePurchase());
         document.getElementById('save-expense-button').addEventListener('click', () => Finance.saveExpense());
         document.getElementById('save-manual-sale-button').addEventListener('click', () => Sales.saveManualSale());
+        document.getElementById('save-stock-units-button').addEventListener('click', () => Stock.saveStockUnits());
 
         // Eventos de 'change' e botões específicos de modais
         document.getElementById('confirm-sale-payment-method').addEventListener('change', () => Sales.toggleInstallmentFields());
@@ -1993,6 +2016,7 @@ const EventListeners = {
                 if (button.classList.contains('cancel-order-button')) Sales.cancelOrder(button.dataset.id);
                 if (button.classList.contains('remove-sale-item-button')) Sales.removeItemFromSale(parseInt(button.dataset.index));
                 if (button.classList.contains('edit-product-model-button')) Stock.openEditProductModelModal(button.dataset.id);
+                if (button.classList.contains('add-stock-button')) Stock.openAddStockModal(button.dataset.id);
                 if (button.classList.contains('delete-product-model-button')) Stock.deleteProductModel(button.dataset.id);
                 if (button.classList.contains('confirm-receipt-button')) Purchases.confirmPurchaseReceipt(button.dataset.id);
                 if (button.classList.contains('delete-purchase-button')) Purchases.deletePurchase(button.dataset.id);
@@ -2047,7 +2071,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Auth.init();
     EventListeners.init();
     Shop.loadPublicProducts();
-    console.log('Techmess ERP v5.1 - Sistema Profissional de Gestão inicializado com sucesso!');
+    console.log('Techmess ERP v5.2 - Sistema Profissional de Gestão inicializado com sucesso!');
 });
 
 window.TechmessERP = {
@@ -2065,4 +2089,3 @@ window.TechmessERP = {
     Utils,
     UI
 };
-
